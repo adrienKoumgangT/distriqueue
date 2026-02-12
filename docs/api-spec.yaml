@@ -1,0 +1,252 @@
+openapi: 3.0.3
+info:
+  title: DistriQueue API
+  version: 1.0.0
+  description: REST API for job submission, management, and monitoring.
+servers:
+  - url: http://localhost:8080
+    description: Local gateway
+paths:
+  /api/jobs:
+    post:
+      summary: Submit a job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobSubmission"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+    get:
+      summary: List jobs
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [pending, running, completed, failed, cancelled]
+        - in: query
+          name: type
+          schema:
+            type: string
+        - in: query
+          name: priority
+          schema:
+            type: string
+            enum: [LOW, MEDIUM, HIGH]
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 0
+        - in: query
+          name: size
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobPage"
+  /api/jobs/batch:
+    post:
+      summary: Submit a batch of jobs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/JobSubmission"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Job"
+  /api/jobs/{id}:
+    get:
+      summary: Get a job by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404":
+          description: Not found
+  /api/jobs/{id}/cancel:
+    post:
+      summary: Cancel a job
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+  /api/jobs/{id}/retry:
+    post:
+      summary: Retry a job
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Retried
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+  /api/jobs/statistics:
+    get:
+      summary: Job statistics
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStatistics"
+  /api/jobs/stream:
+    get:
+      summary: Stream job updates (SSE)
+      responses:
+        "200":
+          description: OK
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /api/swagger-ui.html:
+    get:
+      summary: Swagger UI
+      responses:
+        "200":
+          description: OK
+  /api/api-docs:
+    get:
+      summary: OpenAPI JSON
+      responses:
+        "200":
+          description: OK
+  /api/actuator/health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /api/actuator/prometheus:
+    get:
+      summary: Prometheus metrics
+      responses:
+        "200":
+          description: OK
+components:
+  schemas:
+    JobSubmission:
+      type: object
+      required: [type]
+      properties:
+        id:
+          type: string
+          description: Optional client-supplied job ID.
+        type:
+          type: string
+          description: Job type (used for handler selection).
+        jobPriority:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+        payload:
+          type: object
+          additionalProperties: true
+        maxRetries:
+          type: integer
+          minimum: 0
+        executionTimeout:
+          type: integer
+          description: Timeout in seconds.
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        jobPriority:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+        payload:
+          type: object
+          additionalProperties: true
+        result:
+          type: object
+          additionalProperties: true
+        errorMessage:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    JobPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/Job"
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+    JobStatistics:
+      type: object
+      properties:
+        total:
+          type: integer
+        pending:
+          type: integer
+        running:
+          type: integer
+        completed:
+          type: integer
+        failed:
+          type: integer
+        cancelled:
+          type: integer

@@ -1,0 +1,74 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:/app/data/distriqueue;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL}
+    driver-class-name: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME:org.h2.Driver}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+
+  jpa:
+    database-platform: ${SPRING_JPA_DATABASE_PLATFORM:org.hibernate.dialect.H2Dialect}
+    hibernate:
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:update}
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          batch_size: 20
+        order_inserts: true
+        order_updates: true
+
+  h2:
+    console:
+      enabled: ${SPRING_H2_CONSOLE_ENABLED:true}
+      path: ${SPRING_H2_CONSOLE_PATH:/h2-console}
+      settings:
+        web-allow-others: true
+        trace: false
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq1}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:admin}
+    password: ${RABBITMQ_PASSWORD:admin}
+
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:distriqueue}
+      database: 0
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
+distriqueue:
+  erlang:
+    nodes: ${ERLANG_NODES:orchestrator1@distriqueue,orchestrator2@distriqueue,orchestrator3@distriqueue}
+    mode: ${ERLANG_MODE:http}
+    rest:
+      port: ${ERLANG_REST_PORT:8081}
+
+  job:
+    default-timeout: ${JOB_DEFAULT_TIMEOUT:300}
+    default-retries: ${JOB_DEFAULT_RETRIES:3}
+    max-batch-size: ${JOB_MAX_BATCH_SIZE:1000}
+    cleanup:
+      retention-days: ${JOB_RETENTION_DAYS:30}
+      enabled: ${JOB_CLEANUP_ENABLED:true}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,h2-console
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true

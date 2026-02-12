@@ -1,0 +1,111 @@
+spring:
+  application:
+    name: distriqueue-java-worker
+
+  # RabbitMQ Configuration
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq1}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:admin}
+    password: ${RABBITMQ_PASSWORD:admin}
+    connection-timeout: 5s
+    virtual-host: /
+
+    # Listener configuration
+    listener:
+      simple:
+        concurrency: 3
+        max-concurrency: 10
+        prefetch: 1
+        default-requeue-rejected: false
+        missing-queues-fatal: false
+        retry:
+          enabled: true
+          initial-interval: 1s
+          multiplier: 2.0
+          max-interval: 10s
+          stateless: true
+          max-retries: 3
+      direct:
+        retry:
+          enabled: true
+
+    # Template configuration
+    template:
+      retry:
+        enabled: true
+        initial-interval: 1s
+        multiplier: 2.0
+        max-interval: 10s
+        max-retries: 3
+
+  # Jackson Configuration
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    time-zone: UTC
+
+# Worker Configuration
+distriqueue:
+  worker:
+    id: ${WORKER_ID:java-worker-${random.uuid}}
+    type: ${WORKER_TYPE:java}
+    capacity: ${WORKER_CAPACITY:10}
+
+    # Job queues to consume from
+    queues:
+      - job.high
+      - job.medium
+      - job.low
+
+    # Job retry configuration
+    job:
+      max-retries: 3
+      retry-initial-interval: 1000
+      retry-multiplier: 2.0
+      retry-max-interval: 10000
+      timeout: 300
+      concurrency: 5
+
+    # Health check configuration
+    health:
+      heartbeat-interval: 10000
+      max-failures: 3
+
+    # Status update configuration
+    status:
+      update-url: ${STATUS_UPDATE_URL:http://api-gateway:8080/api/v1/jobs/status}
+      retry-attempts: 3
+      retry-delay: 1000
+
+    # Metrics configuration
+    metrics:
+      enabled: true
+      export-interval: 30000
+
+# Server Configuration
+server:
+  port: ${SERVER_PORT:8082}
+  servlet:
+    context-path: /worker
+
+# Management Endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# Logging
+logging:
+  level:
+    com.distriqueue.worker: DEBUG
+    org.springframework.amqp: INFO
+    org.springframework.retry: DEBUG

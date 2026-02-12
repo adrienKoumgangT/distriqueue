@@ -1,0 +1,352 @@
+{
+  "rabbit_version": "3.13",
+  "rabbitmq_version": "3.13.0",
+  "product_name": "RabbitMQ",
+  "product_version": "3.13.0",
+  "users": [
+    {
+      "name": "admin",
+      "password_hash": "YP0rmn9TniEYKzlnFz8k6zYj+hmppg6j3V7EqgPv9U8e4j5E",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": "administrator"
+    },
+    {
+      "name": "distriqueue",
+      "password_hash": "m7R3vK9xL2pQ5wY8zA1cF4jN6sH8bV2eK5nM9qR3tX7yZ4wC",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": "management"
+    },
+    {
+      "name": "worker",
+      "password_hash": "p9sD5fG7hJ3kL1zX9cV7bN5mQ2wR4tY6uI8oP0aS6dF8gH2j",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": "none"
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/"
+    },
+    {
+      "name": "distriqueue"
+    },
+    {
+      "name": "jobs"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "admin",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "admin",
+      "vhost": "distriqueue",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "admin",
+      "vhost": "jobs",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "distriqueue",
+      "vhost": "distriqueue",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "distriqueue",
+      "vhost": "jobs",
+      "configure": "^job\\..*",
+      "write": "^job\\..*",
+      "read": "^job\\..*"
+    },
+    {
+      "user": "worker",
+      "vhost": "jobs",
+      "configure": "^$",
+      "write": "^(amq\\.default|job\\.status)$",
+      "read": "^(job\\.(high|medium|low)|job\\.dead-letter)$"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "federation-upstream",
+      "vhost": "jobs",
+      "component": "federation-upstream",
+      "value": {
+        "uri": "amqp://admin:admin@rabbitmq2:5672",
+        "ack-mode": "on-confirm",
+        "trust-user-id": false,
+        "max-hops": 1,
+        "expires": 3600000,
+        "message-ttl": 86400000
+      }
+    }
+  ],
+  "policies": [
+    {
+      "vhost": "jobs",
+      "name": "job-queue-policy",
+      "pattern": "^job\\..*",
+      "definition": {
+        "max-length": 1000000,
+        "max-length-bytes": 1073741824,
+        "max-in-memory-length": 1000,
+        "max-in-memory-bytes": 10485760,
+        "overflow": "drop-head",
+        "dead-letter-exchange": "",
+        "dead-letter-routing-key": "job.dead-letter",
+        "message-ttl": 86400000,
+        "expires": 604800000,
+        "queue-mode": "default",
+        "x-queue-type": "classic"
+      },
+      "priority": 10,
+      "apply-to": "queues"
+    },
+    {
+      "vhost": "jobs",
+      "name": "high-priority-policy",
+      "pattern": "^job\\.high$",
+      "definition": {
+        "max-priority": 10,
+        "max-length": 100000,
+        "max-length-bytes": 1073741824,
+        "x-queue-type": "quorum",
+        "delivery-limit": 3,
+        "x-max-in-memory-length": 1000
+      },
+      "priority": 20,
+      "apply-to": "queues"
+    },
+    {
+      "vhost": "jobs",
+      "name": "medium-priority-policy",
+      "pattern": "^job\\.medium$",
+      "definition": {
+        "max-priority": 5,
+        "max-length": 200000,
+        "max-length-bytes": 1073741824,
+        "x-queue-type": "quorum",
+        "delivery-limit": 3
+      },
+      "priority": 15,
+      "apply-to": "queues"
+    },
+    {
+      "vhost": "jobs",
+      "name": "low-priority-policy",
+      "pattern": "^job\\.low$",
+      "definition": {
+        "max-priority": 1,
+        "max-length": 500000,
+        "max-length-bytes": 2147483648,
+        "x-queue-type": "classic",
+        "delivery-limit": 2
+      },
+      "priority": 10,
+      "apply-to": "queues"
+    },
+    {
+      "vhost": "jobs",
+      "name": "dead-letter-policy",
+      "pattern": "^job\\.dead-letter$",
+      "definition": {
+        "max-length": 1000000,
+        "max-length-bytes": 1073741824,
+        "message-ttl": 604800000,
+        "x-queue-type": "classic"
+      },
+      "priority": 5,
+      "apply-to": "queues"
+    },
+    {
+      "vhost": "jobs",
+      "name": "federation-policy",
+      "pattern": "^job\\..*",
+      "definition": {
+        "federation-upstream-set": "all"
+      },
+      "priority": 0,
+      "apply-to": "exchanges"
+    }
+  ],
+  "queues": [
+    {
+      "name": "job.high",
+      "vhost": "jobs",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-max-priority": 10,
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "job.dead-letter",
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 3,
+        "x-max-length": 100000,
+        "x-max-length-bytes": 1073741824,
+        "x-max-in-memory-length": 1000,
+        "x-message-ttl": 86400000,
+        "x-expires": 604800000
+      }
+    },
+    {
+      "name": "job.medium",
+      "vhost": "jobs",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-max-priority": 5,
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "job.dead-letter",
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 3,
+        "x-max-length": 200000,
+        "x-max-length-bytes": 1073741824,
+        "x-message-ttl": 86400000,
+        "x-expires": 604800000
+      }
+    },
+    {
+      "name": "job.low",
+      "vhost": "jobs",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-max-priority": 1,
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "job.dead-letter",
+        "x-queue-type": "classic",
+        "x-delivery-limit": 2,
+        "x-max-length": 500000,
+        "x-max-length-bytes": 2147483648,
+        "x-message-ttl": 172800000,
+        "x-expires": 604800000
+      }
+    },
+    {
+      "name": "job.dead-letter",
+      "vhost": "jobs",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-max-length": 1000000,
+        "x-max-length-bytes": 1073741824,
+        "x-message-ttl": 604800000
+      }
+    },
+    {
+      "name": "job.status",
+      "vhost": "jobs",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-max-length": 100000,
+        "x-message-ttl": 3600000,
+        "x-delivery-limit": 2
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "jobs.exchange",
+      "vhost": "jobs",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "status.exchange",
+      "vhost": "jobs",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "dead.letter.exchange",
+      "vhost": "jobs",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": true,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "jobs.exchange",
+      "vhost": "jobs",
+      "destination": "job.high",
+      "destination_type": "queue",
+      "routing_key": "job.high",
+      "arguments": {}
+    },
+    {
+      "source": "jobs.exchange",
+      "vhost": "jobs",
+      "destination": "job.medium",
+      "destination_type": "queue",
+      "routing_key": "job.medium",
+      "arguments": {}
+    },
+    {
+      "source": "jobs.exchange",
+      "vhost": "jobs",
+      "destination": "job.low",
+      "destination_type": "queue",
+      "routing_key": "job.low",
+      "arguments": {}
+    },
+    {
+      "source": "status.exchange",
+      "vhost": "jobs",
+      "destination": "job.status",
+      "destination_type": "queue",
+      "routing_key": "job.status.*",
+      "arguments": {}
+    },
+    {
+      "source": "",
+      "vhost": "jobs",
+      "destination": "job.dead-letter",
+      "destination_type": "queue",
+      "routing_key": "job.dead-letter",
+      "arguments": {}
+    }
+  ],
+  "global_parameters": [
+    {
+      "name": "cluster_name",
+      "value": "distriqueue-cluster"
+    },
+    {
+      "name": "internal_cluster_id",
+      "value": "distriqueue_cluster_2026"
+    }
+  ],
+  "topic_permissions": [
+    {
+      "user": "worker",
+      "vhost": "jobs",
+      "exchange": "amq.topic",
+      "write": "^job\\.status\\..*",
+      "read": "^job\\..*"
+    }
+  ]
+}

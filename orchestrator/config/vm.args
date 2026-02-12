@@ -1,0 +1,37 @@
+%% orchestrator/config/vm.args
+## Name of the node
+-name ${NODE_NAME:-orchestrator1@distriqueue}
+
+## Cookie for distributed erlang
+-setcookie ${COOKIE:-distriqueue-cookie}
+
+## Heartbeat management; auto-restarts VM if it dies or becomes unresponsive
+-heart
+
+## Enable kernel poll and a few async threads
++K true
++A 64
++sbwt none
++sbwtdcpu none
++sbwtdio none
+
+## Increase number of concurrent ports/sockets
++Q 65536
++IOt 65536
+
+## Tweak GC to run more often
+-env ERL_MAX_ETS_TABLES 256000
+-env ERL_FULLSWEEP_AFTER 10
+
+## SMP settings
+-smp auto
+
+## Increase process limit
++P 250000
+
+## Increase atom limit
++t 1000000
+
+## Paths
+-pa _build/default/lib/*/ebin
+-pz _build/default/rel/distriqueue/lib/*/ebin

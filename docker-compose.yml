@@ -1,0 +1,824 @@
+version: '3.8'
+
+networks:
+  distriqueue-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  rabbitmq1-data:
+  rabbitmq2-data:
+  rabbitmq3-data:
+  h2-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+
+services:
+  # ============================================
+  # RabbitMQ Cluster (3 nodes)
+  # ============================================
+  rabbitmq1:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq1
+    hostname: rabbitmq1
+    environment:
+      - RABBITMQ_ERLANG_COOKIE=distriqueue-cluster-cookie
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbit heartbeat_timeout 60
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbitmq_management load_definitions "/etc/rabbitmq/definitions.json"
+    ports:
+      - "5672:5672"      # AMQP protocol
+      - "15672:15672"    # Management UI
+      - "15692:15692"    # Prometheus metrics
+    volumes:
+      - rabbitmq1-data:/var/lib/rabbitmq
+      - ./config/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./config/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.10
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  rabbitmq2:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq2
+    hostname: rabbitmq2
+    environment:
+      - RABBITMQ_ERLANG_COOKIE=distriqueue-cluster-cookie
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbit heartbeat_timeout 60
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    volumes:
+      - rabbitmq2-data:/var/lib/rabbitmq
+      - ./config/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./config/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.11
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+    command: >
+      bash -c "
+        rabbitmq-server &
+        sleep 20
+        rabbitmqctl stop_app
+        rabbitmqctl join_cluster rabbit@rabbitmq1
+        rabbitmqctl start_app
+        tail -f /dev/null
+      "
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  rabbitmq3:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq3
+    hostname: rabbitmq3
+    environment:
+      - RABBITMQ_ERLANG_COOKIE=distriqueue-cluster-cookie
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbit heartbeat_timeout 60
+    ports:
+      - "5674:5672"
+      - "15674:15672"
+    volumes:
+      - rabbitmq3-data:/var/lib/rabbitmq
+      - ./config/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./config/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.12
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+    command: >
+      bash -c "
+        rabbitmq-server &
+        sleep 20
+        rabbitmqctl stop_app
+        rabbitmqctl join_cluster rabbit@rabbitmq1
+        rabbitmqctl start_app
+        tail -f /dev/null
+      "
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # ============================================
+  # Erlang Orchestrator Cluster (3 nodes)
+  # ============================================
+  orchestrator1:
+    build:
+      context: ./orchestrator
+      dockerfile: docker/Dockerfile
+    container_name: orchestrator1
+    hostname: orchestrator1
+    environment:
+      - NODE_NAME=orchestrator1@distriqueue
+      - COOKIE=distriqueue-cookie
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - HTTP_PORT=8081
+      - METRICS_PORT=9100
+      - RAFT_PEERS=orchestrator2@distriqueue,orchestrator3@distriqueue
+    ports:
+      - "8081:8081"     # HTTP API
+      - "9100:9100"     # Prometheus metrics
+      - "4369:4369"     # EPMD port
+      - "9101:9101"     # Distribution port
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.20
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+    volumes:
+      - ./logs/orchestrator1:/opt/distriqueue/log
+      - ./data/h2:/opt/distriqueue/data  # Shared H2 data directory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  orchestrator2:
+    build:
+      context: ./orchestrator
+      dockerfile: docker/Dockerfile
+    container_name: orchestrator2
+    hostname: orchestrator2
+    environment:
+      - NODE_NAME=orchestrator2@distriqueue
+      - COOKIE=distriqueue-cookie
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - HTTP_PORT=8081
+      - METRICS_PORT=9100
+      - RAFT_PEERS=orchestrator1@distriqueue,orchestrator3@distriqueue
+    ports:
+      - "8082:8081"
+      - "9102:9100"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.21
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+      orchestrator1:
+        condition: service_healthy
+    volumes:
+      - ./logs/orchestrator2:/opt/distriqueue/log
+      - ./data/h2:/opt/distriqueue/data  # Shared H2 data directory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  orchestrator3:
+    build:
+      context: ./orchestrator
+      dockerfile: docker/Dockerfile
+    container_name: orchestrator3
+    hostname: orchestrator3
+    environment:
+      - NODE_NAME=orchestrator3@distriqueue
+      - COOKIE=distriqueue-cookie
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - HTTP_PORT=8081
+      - METRICS_PORT=9100
+      - RAFT_PEERS=orchestrator1@distriqueue,orchestrator2@distriqueue
+    ports:
+      - "8083:8081"
+      - "9103:9100"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.22
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+      orchestrator1:
+        condition: service_healthy
+    volumes:
+      - ./logs/orchestrator3:/opt/distriqueue/log
+      - ./data/h2:/opt/distriqueue/data  # Shared H2 data directory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ============================================
+  # Java Spring Boot API Gateway (3 instances) - H2 Database
+  # ============================================
+  api-gateway1:
+    build:
+      context: ./client-api
+      dockerfile: docker/Dockerfile
+    container_name: api-gateway1
+    environment:
+      - SERVER_PORT=8080
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=distriqueue
+      # H2 Database Configuration
+      - SPRING_DATASOURCE_URL=jdbc:h2:file:/app/data/distriqueue;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL
+      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.h2.Driver
+      - SPRING_DATASOURCE_USERNAME=sa
+      - SPRING_DATASOURCE_PASSWORD=
+      - SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.H2Dialect
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      - SPRING_H2_CONSOLE_ENABLED=true
+      - SPRING_H2_CONSOLE_PATH=/h2-console
+      # Erlang Configuration
+      - ERLANG_NODES=orchestrator1@distriqueue,orchestrator2@distriqueue,orchestrator3@distriqueue
+      - ERLANG_MODE=http
+      - ERLANG_REST_PORT=8081
+      # Job Configuration
+      - JOB_DEFAULT_TIMEOUT=300
+      - JOB_DEFAULT_RETRIES=3
+      - JOB_MAX_BATCH_SIZE=1000
+      - SPRING_PROFILES_ACTIVE=docker,h2
+    ports:
+      - "8080:8080"     # Main API
+      - "8081:8081"     # H2 Console (mapped to different port to avoid conflict with orchestrator)
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.30
+    depends_on:
+      orchestrator1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs/api-gateway1:/app/logs
+      - ./data/h2:/app/data  # Shared H2 data directory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  api-gateway2:
+    build:
+      context: ./client-api
+      dockerfile: docker/Dockerfile
+    container_name: api-gateway2
+    environment:
+      - SERVER_PORT=8080
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=distriqueue
+      # H2 Database Configuration
+      - SPRING_DATASOURCE_URL=jdbc:h2:file:/app/data/distriqueue;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL
+      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.h2.Driver
+      - SPRING_DATASOURCE_USERNAME=sa
+      - SPRING_DATASOURCE_PASSWORD=
+      - SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.H2Dialect
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      - SPRING_H2_CONSOLE_ENABLED=false  # Disable on secondary instances to avoid conflicts
+      # Erlang Configuration
+      - ERLANG_NODES=orchestrator1@distriqueue,orchestrator2@distriqueue,orchestrator3@distriqueue
+      - ERLANG_MODE=http
+      - ERLANG_REST_PORT=8081
+      # Job Configuration
+      - JOB_DEFAULT_TIMEOUT=300
+      - JOB_DEFAULT_RETRIES=3
+      - JOB_MAX_BATCH_SIZE=1000
+      - SPRING_PROFILES_ACTIVE=docker,h2
+    ports:
+      - "8084:8080"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.31
+    depends_on:
+      orchestrator1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api-gateway1:
+        condition: service_healthy
+    volumes:
+      - ./logs/api-gateway2:/app/logs
+      - ./data/h2:/app/data  # Shared H2 data directory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  api-gateway3:
+    build:
+      context: ./client-api
+      dockerfile: docker/Dockerfile
+    container_name: api-gateway3
+    environment:
+      - SERVER_PORT=8080
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=distriqueue
+      # H2 Database Configuration
+      - SPRING_DATASOURCE_URL=jdbc:h2:file:/app/data/distriqueue;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL
+      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.h2.Driver
+      - SPRING_DATASOURCE_USERNAME=sa
+      - SPRING_DATASOURCE_PASSWORD=
+      - SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.H2Dialect
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      - SPRING_H2_CONSOLE_ENABLED=false  # Disable on secondary instances to avoid conflicts
+      # Erlang Configuration
+      - ERLANG_NODES=orchestrator1@distriqueue,orchestrator2@distriqueue,orchestrator3@distriqueue
+      - ERLANG_MODE=http
+      - ERLANG_REST_PORT=8081
+      # Job Configuration
+      - JOB_DEFAULT_TIMEOUT=300
+      - JOB_DEFAULT_RETRIES=3
+      - JOB_MAX_BATCH_SIZE=1000
+      - SPRING_PROFILES_ACTIVE=docker,h2
+    ports:
+      - "8085:8080"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.32
+    depends_on:
+      orchestrator1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api-gateway1:
+        condition: service_healthy
+    volumes:
+      - ./logs/api-gateway3:/app/logs
+      - ./data/h2:/app/data  # Shared H2 data directory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ============================================
+  # H2 Database Console (Standalone for shared access)
+  # ============================================
+  h2-console:
+    image: buildo/h2database:latest
+    container_name: h2-console
+    ports:
+      - "8082:8082"     # H2 Console
+      - "9092:9092"     # H2 TCP Server
+    volumes:
+      - ./data/h2:/opt/h2-data
+    environment:
+      - H2_OPTIONS=-ifNotExists
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.33
+    command: >
+      bash -c "
+        java -cp /opt/h2/bin/h2*.jar org.h2.tools.Server \
+        -web -webAllowOthers -webPort 8082 \
+        -tcp -tcpAllowOthers -tcpPort 9092 \
+        -baseDir /opt/h2-data
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ============================================
+  # Nginx Load Balancer for API Gateways
+  # ============================================
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: nginx-lb
+    ports:
+      - "80:80"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/h2.conf:/etc/nginx/conf.d/h2.conf:ro
+      - ./config/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./static:/usr/share/nginx/html:ro
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.40
+    depends_on:
+      - api-gateway1
+      - api-gateway2
+      - api-gateway3
+      - h2-console
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ============================================
+  # Python Worker Farm (3 instances)
+  # ============================================
+  python-worker1:
+    build:
+      context: ./workers/python-worker
+      dockerfile: Dockerfile
+    container_name: python-worker1
+    environment:
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - WORKER_ID=python-worker-1
+      - WORKER_TYPE=python
+      - WORKER_CAPACITY=10
+      - ORCHESTRATOR_URL=http://orchestrator1:8081
+      - STATUS_UPDATE_URL=http://api-gateway1:8080/api/v1/jobs/status
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.50
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+      orchestrator1:
+        condition: service_healthy
+      api-gateway1:
+        condition: service_healthy
+    restart: unless-stopped
+
+  python-worker2:
+    build:
+      context: ./workers/python-worker
+      dockerfile: Dockerfile
+    container_name: python-worker2
+    environment:
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - WORKER_ID=python-worker-2
+      - WORKER_TYPE=python
+      - WORKER_CAPACITY=10
+      - ORCHESTRATOR_URL=http://orchestrator1:8081
+      - STATUS_UPDATE_URL=http://api-gateway1:8080/api/v1/jobs/status
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.51
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+      orchestrator1:
+        condition: service_healthy
+      api-gateway1:
+        condition: service_healthy
+    restart: unless-stopped
+
+  python-worker3:
+    build:
+      context: ./workers/python-worker
+      dockerfile: Dockerfile
+    container_name: python-worker3
+    environment:
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - WORKER_ID=python-worker-3
+      - WORKER_TYPE=python
+      - WORKER_CAPACITY=10
+      - ORCHESTRATOR_URL=http://orchestrator1:8081
+      - STATUS_UPDATE_URL=http://api-gateway1:8080/api/v1/jobs/status
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.52
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+      orchestrator1:
+        condition: service_healthy
+      api-gateway1:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================
+  # Java Worker Farm (3 instances)
+  # ============================================
+  java-worker1:
+    build:
+      context: ./workers/java-worker
+      dockerfile: docker/Dockerfile
+    container_name: java-worker1
+    environment:
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - WORKER_ID=java-worker-1
+      - WORKER_TYPE=java
+      - WORKER_CAPACITY=10
+      - SERVER_PORT=8082
+      - ORCHESTRATOR_URL=http://orchestrator1:8081
+      - STATUS_UPDATE_URL=http://api-gateway1:8080/api/v1/jobs/status
+    ports:
+      - "8086:8082"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.60
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+      orchestrator1:
+        condition: service_healthy
+      api-gateway1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  java-worker2:
+    build:
+      context: ./workers/java-worker
+      dockerfile: docker/Dockerfile
+    container_name: java-worker2
+    environment:
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - WORKER_ID=java-worker-2
+      - WORKER_TYPE=java
+      - WORKER_CAPACITY=10
+      - SERVER_PORT=8082
+      - ORCHESTRATOR_URL=http://orchestrator1:8081
+      - STATUS_UPDATE_URL=http://api-gateway1:8080/api/v1/jobs/status
+    ports:
+      - "8087:8082"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.61
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+      orchestrator1:
+        condition: service_healthy
+      api-gateway1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  java-worker3:
+    build:
+      context: ./workers/java-worker
+      dockerfile: docker/Dockerfile
+    container_name: java-worker3
+    environment:
+      - RABBITMQ_HOST=rabbitmq1
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin
+      - WORKER_ID=java-worker-3
+      - WORKER_TYPE=java
+      - WORKER_CAPACITY=10
+      - SERVER_PORT=8082
+      - ORCHESTRATOR_URL=http://orchestrator1:8081
+      - STATUS_UPDATE_URL=http://api-gateway1:8080/api/v1/jobs/status
+    ports:
+      - "8088:8082"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.62
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+      orchestrator1:
+        condition: service_healthy
+      api-gateway1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ============================================
+  # Redis for Caching and Rate Limiting
+  # ============================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    command: redis-server --appendonly yes --requirepass distriqueue
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.70
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "distriqueue", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ============================================
+  # Monitoring Stack
+  # ============================================
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: prometheus
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.80
+    depends_on:
+      - rabbitmq1
+      - orchestrator1
+      - api-gateway1
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3000:3000"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.81
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: node-exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "9100:9100"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.82
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    privileged: true
+    ports:
+      - "8089:8080"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.83
+    restart: unless-stopped
+
+  # ============================================
+  # Admin Tools
+  # ============================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0:distriqueue
+      - REDIS_PASSWORD=distriqueue
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=admin
+    ports:
+      - "8089:8081"
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.101
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # ============================================
+  # Portainer for Container Management
+  # ============================================
+  portainer:
+    image: portainer/portainer-ce:2.19.4
+    container_name: portainer
+    command: -H unix:///var/run/docker.sock
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data/portainer:/data
+    networks:
+      distriqueue-net:
+        ipv4_address: 172.20.0.110
+    restart: unless-stopped

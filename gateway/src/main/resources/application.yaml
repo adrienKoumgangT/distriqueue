@@ -1,0 +1,136 @@
+# application.yml
+spring:
+  application:
+    name: gateway
+  
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq1}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:admin}
+    password: ${RABBITMQ_PASSWORD:admin}
+    virtual-host: /
+    connection-timeout: 5000
+    listener:
+      simple:
+        prefetch: 10
+        default-requeue-rejected: false
+  
+  datasource:
+    url: jdbc:h2:file:./data/distriqueue;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: true
+        jdbc:
+          batch_size: 20
+        order_inserts: true
+        order_updates: true
+    show-sql: false
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+      indent-output: true
+    deserialization:
+      fail-on-unknown-properties: false
+    time-zone: UTC
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      database: 0
+  web:
+    error:
+      include-message: always
+      include-binding-errors: always
+      include-stacktrace: on_param
+      include-exception: false
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /api
+
+distriqueue:
+  erlang:
+    nodes: ${ERLANG_NODES:orchestrator1@distriqueue,orchestrator2@distriqueue}
+    rest:
+      port: ${ERLANG_REST_PORT:8081}
+    cookie: ${ERLANG_COOKIE:distriqueue-cookie}
+  
+  job:
+    default-timeout: ${JOB_DEFAULT_TIMEOUT:300}
+    default-retries: ${JOB_DEFAULT_RETRIES:3}
+    max-batch-size: ${JOB_MAX_BATCH_SIZE:1000}
+    cleanup:
+      retention-days: ${JOB_RETENTION_DAYS:30}
+      enabled: ${JOB_CLEANUP_ENABLED:true}
+  
+  worker:
+    health-check:
+      interval: ${WORKER_HEALTH_CHECK_INTERVAL:30000}
+      timeout: ${WORKER_HEALTH_TIMEOUT:120000}
+  
+  rabbitmq:
+    exchange:
+      jobs: ${RABBITMQ_EXCHANGE_JOBS:jobs.exchange}
+      status: ${RABBITMQ_EXCHANGE_STATUS:status.exchange}
+    queue:
+      job:
+        high: ${RABBITMQ_QUEUE_JOB_HIGH:job.high}
+        medium: ${RABBITMQ_QUEUE_JOB_MEDIUM:job.medium}
+        low: ${RABBITMQ_QUEUE_JOB_LOW:job.low}
+      status: ${RABBITMQ_QUEUE_STATUS:status.queue}
+      dead-letter: ${RABBITMQ_QUEUE_DEAD_LETTER:job.dead-letter}
+
+# Logging Configuration
+logging:
+  level:
+    com.distriqueue: DEBUG
+    org.springframework.amqp: INFO
+    org.springframework.web: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: ./logs/gateway.log
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB
+      max-history: 30
+
+# Management Endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# OpenAPI/Swagger Configuration
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
+  default-consumes-media-type: application/json
+  default-produces-media-type: application/json
