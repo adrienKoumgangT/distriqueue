@@ -1,0 +1,29 @@
+\chapter{Conclusion}\label{ch:conclusion}
+
+TaskForce successfully demonstrates a complete distributed job scheduling system that addresses the core challenge of distributed systems:
+coordination, communication, and fault tolerance.
+The project fulfills all course requirements:
+
+\begin{enumerate}
+    \item \textbf{Synchronization/Coordination}: Raft consensus, CRDTs, distributed locks
+    \item \textbf{Communication}: RabbitMQ, HTTP/REST, SSE, Erlang messaging
+    \item \textbf{Erlang Component}: Full orchestrator with OTP behaviors
+    \item \textbf{Multi-node Deployment}: VM deployments
+\end{enumerate}
+
+The system achieves:
+\begin{itemize}
+    \item \textbf{High availability} through clustering and automatic failover
+    \item \textbf{Scalability} by adding worker nodes
+    \item \textbf{Reliability} with exactly-once execution semantics
+    \item \textbf{Observability} via comprehensive monitoring
+    \item \textbf{Extensibility} through polyglot worker architecture
+\end{itemize}
+
+This project represents not just a course requirement, but a production-quality distributed system that demonstrates deep understanding of
+distributed systems principles and their practical implementation.
+The code is well-structured, documented, and ready for extension.
+
+The experience gained from implementing Raft from scratch, integrating multiple technologies, and deploying on real VMs has provided invaluable insight
+into the challenges and solutions in distributed systems engineering.
+

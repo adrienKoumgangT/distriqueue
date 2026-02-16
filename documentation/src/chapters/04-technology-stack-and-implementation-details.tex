@@ -1,0 +1,159 @@
+\chapter{Technology Stack And Implementation Details}\label{ch:technology-stack-and-implementation-details}
+
+
+\section{Project Structure}\label{sec:project-structure}
+
+The project consists primarily of these files:
+\begin{itemize}
+    \item \textbf{orchestrator/}: Erlang/OTP application
+    \item \textbf{gateway/}: Java Spring Boot API
+    \item \textbf{workers/python-worker/}: Python worker implementation
+    \item \textbf{workers/java-worker/}: Java worker implementation
+    \item \textbf{deploy/}: Deployment scripts and config
+\end{itemize}
+
+
+\section{Erlang/OTP (Orchestrator)}\label{sec:erlang/otp-(orchestrator)}
+
+
+\subsection{Key Implementation: Raft Consensus}\label{subsec:key-implementation:-raft-consensus}
+
+File: `orchestrator/src/raft\_fsm.erl`
+
+The Raft implementation consists of 3 state functions and 6 cores operations (simplified version):
+\begin{lstlisting}[language=Erlang, caption={Raft Consensus implementation}, label={lst:key-implementation:-raft-consensus}]
+%%% State 1: Follower (default state)
+follower(state_timeout, election_timeout, State) ->
+    % No heartbeat from leader, start election
+    NewTerm = State#state.current_term + 1,
+    become_candidate(NewTerm, State).
+
+%%% State 2: Candidate
+candidate(cast, {request_vote_reply, {vote_granted, _, Term, true}}, State) ->
+    Votes = State#state.votes + 1,
+    Majority = (length(State#state.peers) + 1) div 2 + 1,
+    if Votes >= Majority -> become_leader(State);
+       true -> State#state{votes = Votes}
+    end.
+
+%%% State 3: Leader
+leader({call, From}, {propose, Command}, State) ->
+    % Append to local log
+    LogEntry = {State#state.current_term, Command},
+    NewLog = State#state.log ++ [LogEntry],
+
+    % Replicate to followers (asynchronous)
+    replicate_to_followers(NewLog, State),
+
+    {keep_state, State#state{log = NewLog},
+     [{reply, From, {ok, length(NewLog)}}]}.
+\end{lstlisting}
+
+\textbf{Complexity Analysis}:
+\begin{itemize}
+    \item \textbf{Time complexity}: $O(n)$ for log replication, $O(1)$ for leader election
+    \item \textbf{Space complexity}: $O(jobs)$ for log storage
+    \item \textbf{Message complexity}: $O(n)$ heartbeats per leader, $O(n^2)$
+\end{itemize}
+
+
+\subsection{Key Implementation: CRDT Job Registry}\label{subsec:key-implementation:-crdt-job-registry}
+
+File: `orchestrator/src/job\_registry.erl`
+
+The job registry uses an Observed-Remove Set (OR-Set) CRDT (simplified version):
+\begin{lstlisting}[language=Erlang, caption={CRDT Job Registry implementation}, label={lst:key-implementation:-crdt-job-registry}]
+% CRDT state: {Key, {Timestamp, Value}}
+merge(State1, State2) ->
+    orddict:merge(
+        fun(_Key, {T1, V1}, {T2, V2}) ->
+            if T1 > T2 -> {T1, V1};
+               true    -> {T2, V2}
+            end
+        end, State1, State2).
+
+% Add operation with timestamp
+add(Key, Value, State) ->
+    Timestamp = erlang:system_time(microsecond),
+    orddict:store(Key, {Timestamp, Value}, State).
+
+% Remove operation (tombstone)
+remove(Key, State) ->
+    Timestamp = erlang:system_time(microsecond),
+    orddict:store(Key, {Timestamp, removed}, State).
+\end{lstlisting}
+
+
+\textbf{Convergence Proof}:
+For any two replicas, after applying all operations and merging, both replicas with have identical state.
+
+
+\subsection{Key Implementation: Worker Pool with Load Balancing}\label{subsec:key-implementation:-worker-pool-with-load-balancing}
+
+Example with Python (simplified version):
+\begin{lstlisting}[language=Python, caption={Worker Pool with Load Balancing (Python version)}, label={lst:key-implementation:-worker-pool-with-load-balancing-python-version}]
+class PythonWorker:
+    def process_job(self, ch, method, properties, body):
+        job = json.loads(body)
+        job_id = job.get('id')
+
+        # Send running status
+        self.send_status_update(job_id, 'running')
+
+        try:
+            # Find appropriate handler
+            handler = self.find_handler(job.get('type'))
+            result = handler.execute(job)
+
+            # Send completion status
+            self.send_status_update(job_id, 'completed', result)
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+
+        except Exception as e:
+            # Handle failure with retry logic
+            retry_count = job.get('retry_count', 0)
+            if retry_count < job.get('max_retries', 3):
+                job['retry_count'] = retry_count + 1
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+            else:
+                self.send_status_update(job_id, 'failed', error=str(e))
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+\end{lstlisting}
+
+\subsection{Database Schema}\label{subsec:database-schema}
+
+\begin{lstlisting}[language=SQL, caption={Database Schema}, label={lst:database-schema}]
+CREATE TABLE jobs (
+    id VARCHAR(36) PRIMARY KEY,
+    type VARCHAR(50) NOT NULL,
+    priority VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    worker_id VARCHAR(100),
+    payload CLOB,
+    result CLOB,
+    error_message VARCHAR(1000),
+    retry_count INT DEFAULT 0,
+    max_retries INT DEFAULT 3,
+    execution_timeout INT DEFAULT 300,
+    created_at TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    metadata CLOB,
+    parent_job_id VARCHAR(36),
+    callback_url VARCHAR(500),
+    tags VARCHAR(500),
+    queue_name VARCHAR(50),
+    processing_node VARCHAR(100),
+    version BIGINT
+);
+
+CREATE INDEX idx_job_status ON jobs(status);
+CREATE INDEX idx_job_type ON jobs(type);
+CREATE INDEX idx_job_priority ON jobs(priority);
+CREATE INDEX idx_job_created ON jobs(created_at);
+CREATE INDEX idx_job_worker ON jobs(worker_id);
+\end{lstlisting}
+
+
+

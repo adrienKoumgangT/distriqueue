@@ -1,0 +1,41 @@
+\chapter{System Architecture}\label{ch:system-architecture}
+
+
+\section{High-Level Architecture}\label{sec:high-level-architecture}
+
+\section{Data Flow}\label{sec:data-flow}
+
+Job Submission Flow:
+\begin{enumerate}
+    \item Client submits job via REST API to API Gateway
+    \item API Gateway stores job in H2 database, publishers to RabbitMQ
+    \item RabbitMQ queues job based on priority (High/Medium/Low)
+    \item Erlang Orchestrator consumes job, assigns to worker via load balancing
+    \item Worker executes job, sends status updates via REST
+    \item API Gateway updates job status, notifies clients via SSE
+\end{enumerate}
+
+Failure Recovery Flow:
+\begin{enumerate}
+    \item Leader orchestrator node fails
+    \item Remaining nodes detect failure via heartbeat timeout
+    \item Raft consensus elects new leader
+    \item New leader resumes job processing
+    \item Failed node rejoins cluster as follower
+\end{enumerate}
+
+\section{Component Responsabilities}\label{sec:component-responsabilities}
+
+\begin{itemize}
+    \item \textbf{Orchestrator} (Erlang/OTP): Leader election, job registry, worker coordination, health monitoring
+    \item \textbf{API Gateway} (Java/Spring Boot): REST API, job persistence, SSE streaming, rate limiting
+    \item \textbf{Message Broker} (RabbitMQ): Priority queuing, message persistence, dead letter handling
+    \item \textbf{Workers} (Python, Java): Job execution (calculation, transformation, validation)
+    \item \textbf{Load Balancer} (Nginx): Traffic distribution across APU gateways
+    \item \textbf{Database} (H2): Job metadata persistence
+    \item \textbf{Cache} (Redis): Session management, rate limiting
+    \item \textbf{Monitoring} (Prometheus/Grafana): Metrics collection and visualization
+\end{itemize}
+
+
+
