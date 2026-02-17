@@ -735,7 +735,7 @@ class PythonWorker:
 def main():
     """Main entry point"""
     # Get configuration from environment variables
-    rabbitmq_host = os.getenv('RABBITMQ_HOST', 'rabbitmq1')
+    rabbitmq_host = os.getenv('RABBITMQ_HOST', '10.2.1.11')
     rabbitmq_port = int(os.getenv('RABBITMQ_PORT', '5672'))
     rabbitmq_user = os.getenv('RABBITMQ_USERNAME', 'admin')
     rabbitmq_pass = os.getenv('RABBITMQ_PASSWORD', 'admin')
@@ -744,8 +744,8 @@ def main():
     worker_type = os.getenv('WORKER_TYPE', 'python')
     capacity = int(os.getenv('WORKER_CAPACITY', '10'))
 
-    orchestrator_url = os.getenv('ORCHESTRATOR_URL', 'http://orchestrator1:8081')
-    status_update_url = os.getenv('STATUS_UPDATE_URL', 'http://api-gateway:8080/api/v1/jobs/status')
+    orchestrator_url = os.getenv('ORCHESTRATOR_URL', 'http://10.2.1.11:8081')
+    status_update_url = os.getenv('STATUS_UPDATE_URL', 'http://10.2.1.11:8080/api/jobs/status')
 
     # Create and start worker
     worker = PythonWorker(
