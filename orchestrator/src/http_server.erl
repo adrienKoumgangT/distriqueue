@@ -2,7 +2,7 @@
 %%% @author adrien koumgang tegantchouang
 %%% @copyright (C) 2026, University of Pise
 %%% @doc
-%%%
+%%% API Gateway HTTP Server
 %%% @end
 %%%-------------------------------------------------------------------
 -module(http_server).
@@ -17,6 +17,19 @@
 
 %% Gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
+
+%% Define the job record used for parsing jobs into JSON
+-record(job, {
+  id,
+  type,
+  priority,
+  worker_id,
+  created_at,
+  started_at,
+  completed_at,
+  status,
+  payload
+}).
 
 -record(state, {
   port = 8081,
@@ -41,7 +54,9 @@ init([]) ->
 
 handle_call(stop, _From, State) ->
   cowboy:stop_listener(State#state.listener),
-  {stop, normal, ok, State}.
+  {stop, normal, ok, State};
+handle_call(_Request, _From, State) ->
+  {reply, ok, State}.
 
 handle_cast(_Msg, State) ->
   {noreply, State}.
@@ -69,39 +84,42 @@ handle_info(timeout, State) ->
 
   lager:info("HTTP server started on port ~p", [Port]),
 
-  {noreply, State#state{listener = Listener, routes = Routes}}.
+  {noreply, State#state{listener = Listener, routes = Routes}};
+handle_info(_Info, State) ->
+  {noreply, State}.
 
 %%% COWBOY HANDLERS %%%
+%% FIX: cowboy_req:reply returns Req directly, not {ok, Req}
 init(Req, health) ->
-  {ok, Req1} = handle_health(Req),
+  Req1 = handle_health(Req),
   {ok, Req1, health};
 
 init(Req, cluster_status) ->
-  {ok, Req1} = handle_cluster_status(Req),
+  Req1 = handle_cluster_status(Req),
   {ok, Req1, cluster_status};
 
 init(Req, register_job) ->
-  {ok, Req1} = handle_register_job(Req),
+  Req1 = handle_register_job(Req),
   {ok, Req1, register_job};
 
 init(Req, update_job_status) ->
-  {ok, Req1} = handle_update_job_status(Req),
+  Req1 = handle_update_job_status(Req),
   {ok, Req1, update_job_status};
 
 init(Req, cancel_job) ->
-  {ok, Req1} = handle_cancel_job(Req),
+  Req1 = handle_cancel_job(Req),
   {ok, Req1, cancel_job};
 
 init(Req, list_jobs) ->
-  {ok, Req1} = handle_list_jobs(Req),
+  Req1 = handle_list_jobs(Req),
   {ok, Req1, list_jobs};
 
 init(Req, raft_status) ->
-  {ok, Req1} = handle_raft_status(Req),
+  Req1 = handle_raft_status(Req),
   {ok, Req1, raft_status};
 
 init(Req, metrics) ->
-  {ok, Req1} = handle_metrics(Req),
+  Req1 = handle_metrics(Req),
   {ok, Req1, metrics}.
 
 handle_health(Req) ->
@@ -138,21 +156,24 @@ handle_register_job(Req) ->
   {ok, Body, Req1} = cowboy_req:read_body(Req),
 
   try
-    Job = jsx:decode(Body, [return_maps]),
+    %% FIX: Modern JSX returns maps automatically.
+    Job = jsx:decode(Body),
 
     case distriqueue:register_job(Job) of
       ok ->
         Response = jsx:encode(#{
           <<"status">> => <<"accepted">>,
-          <<"job_id">> => maps:get(<<"id">>, Job)
+          <<"job_id">> => maps:get(<<"id">>, Job, <<"unknown">>)
         }),
         cowboy_req:reply(202,
           #{<<"content-type">> => <<"application/json">>},
           Response, Req1);
       Error ->
+        %% Safely format the error in case it's a tuple like {error, Reason}
+        ErrorMsg = list_to_binary(io_lib:format("~p", [Error])),
         Response = jsx:encode(#{
           <<"status">> => <<"error">>,
-          <<"message">> => atom_to_binary(Error, utf8)
+          <<"message">> => ErrorMsg
         }),
         cowboy_req:reply(400,
           #{<<"content-type">> => <<"application/json">>},
@@ -170,8 +191,8 @@ handle_update_job_status(Req) ->
   JobId = cowboy_req:binding(id, Req1),
 
   try
-    #{<<"status">> := Status, <<"worker_id">> := WorkerId} =
-      jsx:decode(Body, [return_maps]),
+    %% FIX: Modern JSX
+    #{<<"status">> := Status, <<"worker_id">> := WorkerId} = jsx:decode(Body),
 
     distriqueue:update_job_status(JobId, Status, WorkerId),
 

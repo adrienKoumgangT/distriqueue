@@ -2,7 +2,7 @@
 %%% @author adrien koumgang tegantchouang
 %%% @copyright (C) 2026, University Of Pise
 %%% @doc
-%%%
+%%% Job Router implementation
 %%% @end
 %%%-------------------------------------------------------------------
 -module(router).
@@ -15,13 +15,16 @@
   assign_worker/1,
   get_queue_stats/0]).
 
+%% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
+-record(job, {id, type, priority, payload, status}).
+
 -record(state, {
-  worker_load = #{},           % WorkerId -> Load
-  worker_capacities = #{},     % WorkerId -> Capacity
-  queue_stats = #{},           % Queue -> {Length, ProcessingRate}
-  routing_strategy = round_robin
+  worker_load = #{} :: map(),           % WorkerId -> Load
+  worker_capacities = #{} :: map(),     % WorkerId -> Capacity
+  queue_stats = #{} :: map(),           % Queue -> {Length, ProcessingRate}
+  routing_strategy = round_robin :: atom()
 }).
 
 %%% PUBLIC API %%%
@@ -39,21 +42,20 @@ get_queue_stats() ->
 
 %%% GEN_SERVER CALLBACKS %%%
 init([]) ->
-  % Initialize with empty state
   {ok, #state{}}.
 
 handle_call({assign_worker, Job}, _From, State) ->
   #job{type = Type, priority = Priority} = Job,
 
-  % Select worker based on strategy
   WorkerId = select_worker(Type, Priority, State),
 
-  % Update worker load (temporary increase)
-  NewLoad = case maps:get(WorkerId, State#state.worker_load, 0) of
-              Load -> State#state.worker_load#{WorkerId => Load + 1}
-            end,
+  %% FIX: Extract the map first, then update it
+  CurrentLoadMap = State#state.worker_load,
+  NewLoadMap = case maps:get(WorkerId, CurrentLoadMap, 0) of
+                 Load -> CurrentLoadMap#{WorkerId => Load + 1}
+               end,
 
-  NewState = State#state{worker_load = NewLoad},
+  NewState = State#state{worker_load = NewLoadMap},
 
   {reply, {ok, WorkerId}, NewState};
 
@@ -63,31 +65,33 @@ handle_call(get_queue_stats, _From, State) ->
 handle_cast({route_job, Job}, State) ->
   #job{id = JobId, priority = Priority} = Job,
 
-  % Determine queue based on priority
   Queue = priority_to_queue(Priority),
 
-  % Publish to RabbitMQ
   rabbitmq_client:publish_job(Queue, Job),
 
-  % Update queue stats
-  Stats = maps:get(Queue, State#state.queue_stats, {0, 0}),
+  %% FIX: Extract the map first, then update it
+  CurrentStatsMap = State#state.queue_stats,
+  Stats = maps:get(Queue, CurrentStatsMap, {0, 0}),
   {Length, Rate} = Stats,
-  NewStats = State#state.queue_stats#{Queue => {Length + 1, Rate}},
 
-  NewState = State#state{queue_stats = NewStats},
+  NewStatsMap = CurrentStatsMap#{Queue => {Length + 1, Rate}},
+  NewState = State#state{queue_stats = NewStatsMap},
 
   lager:debug("Routed job ~p to queue ~p", [JobId, Queue]),
 
   {noreply, NewState};
 
 handle_cast({worker_heartbeat, WorkerId, Capacity, CurrentLoad}, State) ->
-  % Update worker information
-  NewLoad = State#state.worker_load#{WorkerId => CurrentLoad},
-  NewCapacities = State#state.worker_capacities#{WorkerId => Capacity},
+  %% FIX: Extract maps first
+  CurrentLoadMap = State#state.worker_load,
+  CurrentCapMap = State#state.worker_capacities,
+
+  NewLoadMap = CurrentLoadMap#{WorkerId => CurrentLoad},
+  NewCapMap = CurrentCapMap#{WorkerId => Capacity},
 
   NewState = State#state{
-    worker_load = NewLoad,
-    worker_capacities = NewCapacities
+    worker_load = NewLoadMap,
+    worker_capacities = NewCapMap
   },
 
   {noreply, NewState}.
@@ -110,10 +114,7 @@ select_round_robin(State) ->
   Workers = maps:keys(State#state.worker_load),
   case Workers of
     [] -> <<"default_worker">>;
-    _ ->
-      % Simple round-robin (in real implementation, track last used)
-      [Worker | _] = Workers,
-      Worker
+    [Worker | _] -> Worker
   end.
 
 select_least_loaded(State) ->
@@ -121,17 +122,21 @@ select_least_loaded(State) ->
   case Workers of
     [] -> <<"default_worker">>;
     _ ->
-      % Find worker with lowest load/capacity ratio
-      {BestWorker, _} = lists:minby(
-        fun({WorkerId, Load}) ->
+      %% Use a manual fold to find the minimum to avoid missing list functions
+      {BestWorker, _} = lists:foldl(
+        fun({WorkerId, Load}, {AccWorker, AccRatio}) ->
           Capacity = maps:get(WorkerId, State#state.worker_capacities, 10),
-          Load / Capacity
-        end, Workers),
+          Ratio = Load / Capacity,
+          if Ratio < AccRatio -> {WorkerId, Ratio};
+            true -> {AccWorker, AccRatio}
+          end
+        end,
+        {<<"default_worker">>, 999999.0},
+        Workers),
       BestWorker
   end.
 
 select_by_type(Type, State) ->
-  % Map job types to specialized workers
   case Type of
     <<"calculate">> -> <<"python_calc_worker">>;
     <<"transform">> -> <<"java_transform_worker">>;

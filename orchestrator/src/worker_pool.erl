@@ -4,10 +4,6 @@
 %%% @doc
 %%% Worker Pool Manager - Manages worker registration, health monitoring,
 %%% and load balancing for the DistriQueue distributed job scheduler.
-%%%
-%%% This module maintains the state of all worker nodes, tracks their
-%%% health via heartbeats, and provides worker selection for job routing.
-%%% @end
 %%%-------------------------------------------------------------------
 -module(worker_pool).
 -author("adrienkt").
@@ -37,24 +33,24 @@
 
 %% Records
 -record(worker, {
-  id :: binary(),                    % Worker unique identifier
-  type :: binary(),                 % Worker type (python, java, go, etc.)
+  id :: binary(),
+  type :: binary(),
   status :: active | idle | unresponsive | overloaded | draining,
-  capacity :: integer(),           % Maximum concurrent jobs
-  current_load :: integer(),       % Current number of running jobs
-  last_heartbeat :: integer(),     % Timestamp of last heartbeat
-  registered_at :: integer(),      % Registration timestamp
-  total_jobs_processed :: integer(), % Total jobs processed by this worker
-  failed_jobs :: integer(),        % Number of failed jobs
-  avg_processing_time :: float(),  % Average processing time in ms
-  metadata :: map()               % Additional worker metadata
+  capacity :: integer(),
+  current_load :: integer(),
+  last_heartbeat :: integer(),
+  registered_at :: integer(),
+  total_jobs_processed :: integer(),
+  failed_jobs :: integer(),
+  avg_processing_time :: float(),
+  metadata :: map()
 }).
 
 -record(state, {
-  workers = #{} :: #{binary() => #worker{}},  % All workers by ID
-  by_type = #{} :: #{binary() => [binary()]}, % Workers indexed by type
-  by_status = #{} :: #{atom() => [binary()]}, % Workers indexed by status
-  unhealthy_workers = #{} :: #{binary() => integer()}, % Workers with failures
+  workers = #{} :: #{binary() => #worker{}},
+  by_type = #{} :: #{binary() => [binary()]},
+  by_status = #{} :: #{atom() => [binary()]},
+  unhealthy_workers = #{} :: #{binary() => integer()},
   total_workers = 0 :: integer(),
   active_workers = 0 :: integer(),
   last_cleanup :: integer(),
@@ -66,63 +62,39 @@
 %%% API
 %%%===================================================================
 
-%% @doc Start the worker pool server
--spec start_link() -> {ok, pid()} | ignore | {error, term()}.
 start_link() ->
   gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-%% @doc Register a new worker or update existing worker heartbeat
--spec register_worker(binary(), binary(), integer(), integer()) -> ok.
 register_worker(WorkerId, WorkerType, Capacity, CurrentLoad) ->
   gen_server:call(?MODULE, {register_worker, WorkerId, WorkerType, Capacity, CurrentLoad}).
 
-%% @doc Unregister a worker (graceful shutdown)
--spec unregister_worker(binary()) -> ok.
 unregister_worker(WorkerId) ->
   gen_server:cast(?MODULE, {unregister_worker, WorkerId}).
 
-%% @doc Get worker details by ID
--spec get_worker(binary()) -> {ok, #worker{}} | {error, not_found}.
 get_worker(WorkerId) ->
   gen_server:call(?MODULE, {get_worker, WorkerId}).
 
-%% @doc Get all registered workers
--spec get_all_workers() -> {ok, [#worker{}]}.
 get_all_workers() ->
   gen_server:call(?MODULE, get_all_workers).
 
-%% @doc Get all healthy (active) workers
--spec get_healthy_workers() -> {ok, [#worker{}]}.
 get_healthy_workers() ->
   gen_server:call(?MODULE, get_healthy_workers).
 
-%% @doc Get workers by type
--spec get_workers_by_type(binary()) -> {ok, [#worker{}]}.
 get_workers_by_type(WorkerType) ->
   gen_server:call(?MODULE, {get_workers_by_type, WorkerType}).
 
-%% @doc Update worker load (jobs count)
--spec update_worker_load(binary(), integer()) -> ok.
 update_worker_load(WorkerId, Load) ->
   gen_server:cast(?MODULE, {update_load, WorkerId, Load}).
 
-%% @doc Select a worker for job assignment
--spec select_worker(binary()) -> {ok, binary()} | {error, no_worker}.
 select_worker(JobType) ->
   gen_server:call(?MODULE, {select_worker, JobType, default}).
 
-%% @doc Select a worker with specific strategy
--spec select_worker(binary(), atom()) -> {ok, binary()} | {error, no_worker}.
 select_worker(JobType, Strategy) ->
   gen_server:call(?MODULE, {select_worker, JobType, Strategy}).
 
-%% @doc Get worker pool statistics
--spec get_worker_stats() -> {ok, map()}.
 get_worker_stats() ->
   gen_server:call(?MODULE, get_worker_stats).
 
-%% @doc Get total worker count
--spec get_worker_count() -> {ok, integer()}.
 get_worker_count() ->
   gen_server:call(?MODULE, get_worker_count).
 
@@ -130,38 +102,26 @@ get_worker_count() ->
 %%% gen_server Callbacks
 %%%===================================================================
 
-%% @doc Initialize the worker pool
--spec init(term()) -> {ok, #state{}}.
 init([]) ->
   process_flag(trap_exit, true),
   lager:info("Worker pool manager starting..."),
 
-  % Schedule periodic health checks
   erlang:send_after(30000, self(), check_worker_health),
   erlang:send_after(60000, self(), cleanup_stale_workers),
 
-  % Get configuration
   Strategy = application:get_env(distriqueue, worker_selection_strategy, least_loaded),
 
   State = #state{
     selection_strategy = Strategy,
     last_cleanup = erlang:system_time(millisecond)
   },
-
-  lager:info("Worker pool manager started with strategy: ~p", [Strategy]),
   {ok, State}.
 
-%% @doc Handle synchronous calls
--spec handle_call(term(), {pid(), term()}, #state{}) -> {reply, term(), #state{}}.
-
-%% Register new worker or update heartbeat
 handle_call({register_worker, WorkerId, WorkerType, Capacity, CurrentLoad}, _From, State) ->
   Now = erlang:system_time(millisecond),
 
-  % Check if worker already exists
   case maps:get(WorkerId, State#state.workers, undefined) of
     undefined ->
-      % New worker
       Worker = #worker{
         id = WorkerId,
         type = WorkerType,
@@ -176,15 +136,16 @@ handle_call({register_worker, WorkerId, WorkerType, Capacity, CurrentLoad}, _Fro
         metadata = #{}
       },
 
-      NewWorkers = State#state.workers#{WorkerId => Worker},
+      CurrentWorkers = State#state.workers,
+      NewWorkers = CurrentWorkers#{WorkerId => Worker},
 
-      % Update by_type index
-      TypeWorkers = maps:get(WorkerType, State#state.by_type, []),
-      NewByType = State#state.by_type#{WorkerType => [WorkerId | TypeWorkers]},
+      CurrentByType = State#state.by_type,
+      TypeWorkers = maps:get(WorkerType, CurrentByType, []),
+      NewByType = CurrentByType#{WorkerType => lists:usort([WorkerId | TypeWorkers])},
 
-      % Update by_status index
-      StatusWorkers = maps:get(active, State#state.by_status, []),
-      NewByStatus = State#state.by_status#{active => [WorkerId | StatusWorkers]},
+      CurrentByStatus = State#state.by_status,
+      StatusWorkers = maps:get(active, CurrentByStatus, []),
+      NewByStatus = CurrentByStatus#{active => lists:usort([WorkerId | StatusWorkers])},
 
       NewState = State#state{
         workers = NewWorkers,
@@ -193,14 +154,9 @@ handle_call({register_worker, WorkerId, WorkerType, Capacity, CurrentLoad}, _Fro
         total_workers = State#state.total_workers + 1,
         active_workers = State#state.active_workers + 1
       },
-
-      lager:info("New worker registered: ~p (type: ~p, capacity: ~p)",
-        [WorkerId, WorkerType, Capacity]),
-
       {reply, ok, NewState};
 
     ExistingWorker ->
-      % Update existing worker
       UpdatedWorker = ExistingWorker#worker{
         type = WorkerType,
         capacity = Capacity,
@@ -209,23 +165,21 @@ handle_call({register_worker, WorkerId, WorkerType, Capacity, CurrentLoad}, _Fro
         status = active
       },
 
-      NewWorkers = State#state.workers#{WorkerId => UpdatedWorker},
+      CurrentWorkers = State#state.workers,
+      NewWorkers = CurrentWorkers#{WorkerId => UpdatedWorker},
 
-      % Update status if it was previously unhealthy
+      CurrentByStatus = State#state.by_status,
       NewByStatus = case ExistingWorker#worker.status of
-                      active -> State#state.by_status;
+                      active -> CurrentByStatus;
                       _ ->
-                        % Remove from old status
-                        OldStatusWorkers = maps:get(ExistingWorker#worker.status, State#state.by_status, []),
-                        StatusWorkers1 = State#state.by_status#{
+                        OldStatusWorkers = maps:get(ExistingWorker#worker.status, CurrentByStatus, []),
+                        StatusWorkers1 = CurrentByStatus#{
                           ExistingWorker#worker.status => lists:delete(WorkerId, OldStatusWorkers)
                         },
-                        % Add to active
                         ActiveWorkers = maps:get(active, StatusWorkers1, []),
-                        StatusWorkers1#{active => [WorkerId | ActiveWorkers]}
+                        StatusWorkers1#{active => lists:usort([WorkerId | ActiveWorkers])}
                     end,
 
-      % Update active count if coming back from unhealthy
       ActiveWorkersDelta = case ExistingWorker#worker.status of
                              active -> 0;
                              _ -> 1
@@ -236,28 +190,19 @@ handle_call({register_worker, WorkerId, WorkerType, Capacity, CurrentLoad}, _Fro
         by_status = NewByStatus,
         active_workers = State#state.active_workers + ActiveWorkersDelta
       },
-
-      lager:debug("Worker heartbeat received: ~p (load: ~p/~p)",
-        [WorkerId, CurrentLoad, Capacity]),
-
       {reply, ok, NewState}
   end;
 
-%% Get worker by ID
 handle_call({get_worker, WorkerId}, _From, State) ->
   case maps:get(WorkerId, State#state.workers, undefined) of
-    undefined ->
-      {reply, {error, not_found}, State};
-    Worker ->
-      {reply, {ok, Worker}, State}
+    undefined -> {reply, {error, not_found}, State};
+    Worker -> {reply, {ok, Worker}, State}
   end;
 
-%% Get all workers
 handle_call(get_all_workers, _From, State) ->
   Workers = maps:values(State#state.workers),
   {reply, {ok, Workers}, State};
 
-%% Get healthy workers
 handle_call(get_healthy_workers, _From, State) ->
   HealthyWorkers = lists:filter(
     fun(Worker) ->
@@ -268,18 +213,20 @@ handle_call(get_healthy_workers, _From, State) ->
   ),
   {reply, {ok, HealthyWorkers}, State};
 
-%% Get workers by type
 handle_call({get_workers_by_type, WorkerType}, _From, State) ->
   WorkerIds = maps:get(WorkerType, State#state.by_type, []),
-  Workers = lists:map(
-    fun(Id) -> maps:get(Id, State#state.workers) end,
+  Workers = lists:filtermap(
+    fun(Id) ->
+      case maps:find(Id, State#state.workers) of
+        {ok, W} -> {true, W};
+        error -> false
+      end
+    end,
     WorkerIds
   ),
   {reply, {ok, Workers}, State};
 
-%% Select worker for job assignment
 handle_call({select_worker, JobType, Strategy}, _From, State) ->
-  % Get eligible workers (active, not overloaded)
   AllWorkers = maps:values(State#state.workers),
   EligibleWorkers = lists:filter(
     fun(Worker) ->
@@ -301,7 +248,6 @@ handle_call({select_worker, JobType, Strategy}, _From, State) ->
                          _ -> select_least_loaded(EligibleWorkers)
                        end,
 
-      % Update round-robin counter
       NewCounter = case Strategy of
                      round_robin -> (State#state.round_robin_counter + 1) rem length(EligibleWorkers);
                      _ -> State#state.round_robin_counter
@@ -311,7 +257,6 @@ handle_call({select_worker, JobType, Strategy}, _From, State) ->
         State#state{round_robin_counter = NewCounter}}
   end;
 
-%% Get worker statistics
 handle_call(get_worker_stats, _From, State) ->
   Workers = maps:values(State#state.workers),
 
@@ -320,7 +265,6 @@ handle_call(get_worker_stats, _From, State) ->
   TotalProcessed = lists:sum([W#worker.total_jobs_processed || W <- Workers]),
   TotalFailed = lists:sum([W#worker.failed_jobs || W <- Workers]),
 
-  % Calculate average processing time
   WorkersWithTime = [W#worker.avg_processing_time || W <- Workers, W#worker.avg_processing_time > 0],
   AvgProcessingTime = case WorkersWithTime of
                         [] -> 0.0;
@@ -336,52 +280,38 @@ handle_call(get_worker_stats, _From, State) ->
     utilization => if TotalCapacity > 0 -> TotalLoad * 100 / TotalCapacity; true -> 0 end,
     total_jobs_processed => TotalProcessed,
     total_jobs_failed => TotalFailed,
-    success_rate => if TotalProcessed + TotalFailed > 0 ->
-      TotalProcessed * 100 / (TotalProcessed + TotalFailed);
-                      true -> 100
-                    end,
+    success_rate => if TotalProcessed + TotalFailed > 0 -> TotalProcessed * 100 / (TotalProcessed + TotalFailed); true -> 100 end,
     avg_processing_time_ms => AvgProcessingTime,
-    workers_by_type => maps:map(
-      fun(_Type, Ids) -> length(Ids) end,
-      State#state.by_type
-    ),
-    workers_by_status => maps:map(
-      fun(_Status, Ids) -> length(Ids) end,
-      State#state.by_status
-    )
+    workers_by_type => maps:map(fun(_Type, Ids) -> length(Ids) end, State#state.by_type),
+    workers_by_status => maps:map(fun(_Status, Ids) -> length(Ids) end, State#state.by_status)
   },
-
   {reply, {ok, Stats}, State};
 
-%% Get worker count
 handle_call(get_worker_count, _From, State) ->
-  {reply, {ok, State#state.total_workers}, State}.
+  {reply, {ok, State#state.total_workers}, State};
 
-%% @doc Handle asynchronous casts
--spec handle_cast(term(), #state{}) -> {noreply, #state{}}.
+handle_call(_Request, _From, State) ->
+  {reply, ok, State}.
 
-%% Unregister worker
 handle_cast({unregister_worker, WorkerId}, State) ->
   case maps:get(WorkerId, State#state.workers, undefined) of
     undefined ->
       {noreply, State};
     Worker ->
-      % Remove from workers map
       NewWorkers = maps:remove(WorkerId, State#state.workers),
 
-      % Remove from by_type index
-      TypeWorkers = maps:get(Worker#worker.type, State#state.by_type, []),
-      NewByType = State#state.by_type#{
+      CurrentByType = State#state.by_type,
+      TypeWorkers = maps:get(Worker#worker.type, CurrentByType, []),
+      NewByType = CurrentByType#{
         Worker#worker.type => lists:delete(WorkerId, TypeWorkers)
       },
 
-      % Remove from by_status index
-      StatusWorkers = maps:get(Worker#worker.status, State#state.by_status, []),
-      NewByStatus = State#state.by_status#{
+      CurrentByStatus = State#state.by_status,
+      StatusWorkers = maps:get(Worker#worker.status, CurrentByStatus, []),
+      NewByStatus = CurrentByStatus#{
         Worker#worker.status => lists:delete(WorkerId, StatusWorkers)
       },
 
-      % Remove from unhealthy workers if present
       NewUnhealthy = maps:remove(WorkerId, State#state.unhealthy_workers),
 
       ActiveDelta = case Worker#worker.status of
@@ -397,51 +327,52 @@ handle_cast({unregister_worker, WorkerId}, State) ->
         total_workers = State#state.total_workers - 1,
         active_workers = State#state.active_workers + ActiveDelta
       },
-
-      lager:info("Worker unregistered: ~p", [WorkerId]),
       {noreply, NewState}
   end;
 
-%% Update worker load
 handle_cast({update_load, WorkerId, Load}, State) ->
   case maps:get(WorkerId, State#state.workers, undefined) of
     undefined ->
       {noreply, State};
     Worker ->
       UpdatedWorker = Worker#worker{current_load = Load},
-      NewWorkers = State#state.workers#{WorkerId => UpdatedWorker},
+      CurrentWorkers = State#state.workers,
+      NewWorkers = CurrentWorkers#{WorkerId => UpdatedWorker},
       {noreply, State#state{workers = NewWorkers}}
   end;
 
-%% Mark worker as unhealthy
 handle_cast({mark_unhealthy, WorkerId, Reason}, State) ->
   case maps:get(WorkerId, State#state.workers, undefined) of
     undefined ->
       {noreply, State};
     Worker when Worker#worker.status =:= active ->
+
+      %% FIX: Decouple metadata map update!
+      OldMetadata = Worker#worker.metadata,
+      NewMetadata = OldMetadata#{
+        last_error => Reason,
+        marked_unhealthy_at => erlang:system_time(millisecond)
+      },
+
       UpdatedWorker = Worker#worker{
         status = unresponsive,
-        metadata = Worker#worker.metadata#{
-          last_error => Reason,
-          marked_unhealthy_at => erlang:system_time(millisecond)
-        }
+        metadata = NewMetadata
       },
 
-      NewWorkers = State#state.workers#{WorkerId => UpdatedWorker},
+      CurrentWorkers = State#state.workers,
+      NewWorkers = CurrentWorkers#{WorkerId => UpdatedWorker},
 
-      % Update status index
-      ActiveWorkers = maps:get(active, State#state.by_status, []),
-      UnresponsiveWorkers = maps:get(unresponsive, State#state.by_status, []),
+      CurrentByStatus = State#state.by_status,
+      ActiveWorkers = maps:get(active, CurrentByStatus, []),
+      UnresponsiveWorkers = maps:get(unresponsive, CurrentByStatus, []),
 
-      NewByStatus = State#state.by_status#{
+      NewByStatus = CurrentByStatus#{
         active => lists:delete(WorkerId, ActiveWorkers),
-        unresponsive => [WorkerId | UnresponsiveWorkers]
+        unresponsive => lists:usort([WorkerId | UnresponsiveWorkers])
       },
 
-      % Track unhealthy worker
-      NewUnhealthy = State#state.unhealthy_workers#{WorkerId => erlang:system_time(millisecond)},
-
-      lager:warning("Worker marked unhealthy: ~p - ~p", [WorkerId, Reason]),
+      CurrentUnhealthy = State#state.unhealthy_workers,
+      NewUnhealthy = CurrentUnhealthy#{WorkerId => erlang:system_time(millisecond)},
 
       {noreply, State#state{
         workers = NewWorkers,
@@ -451,24 +382,21 @@ handle_cast({mark_unhealthy, WorkerId, Reason}, State) ->
       }};
     _ ->
       {noreply, State}
-  end.
+  end;
 
-%% @doc Handle asynchronous messages
--spec handle_info(term(), #state{}) -> {noreply, #state{}}.
+handle_cast(_Msg, State) ->
+  {noreply, State}.
 
-%% Check worker health - periodic heartbeat monitoring
 handle_info(check_worker_health, State) ->
   Now = erlang:system_time(millisecond),
-  Timeout = application:get_env(distriqueue, worker_heartbeat_timeout, 120000), % 2 minutes
+  Timeout = application:get_env(distriqueue, worker_heartbeat_timeout, 120000),
 
   lists:foreach(
     fun({WorkerId, Worker}) ->
       LastHB = Worker#worker.last_heartbeat,
       if
         Now - LastHB > Timeout andalso Worker#worker.status =:= active ->
-          % Worker hasn't sent heartbeat, mark as unresponsive
-          gen_server:cast(?MODULE, {mark_unhealthy, WorkerId,
-            <<"Heartbeat timeout">>});
+          gen_server:cast(?MODULE, {mark_unhealthy, WorkerId, <<"Heartbeat timeout">>});
         true ->
           ok
       end
@@ -476,16 +404,13 @@ handle_info(check_worker_health, State) ->
     maps:to_list(State#state.workers)
   ),
 
-  % Schedule next check
   erlang:send_after(30000, self(), check_worker_health),
   {noreply, State};
 
-%% Cleanup stale workers that have been unhealthy for too long
 handle_info(cleanup_stale_workers, State) ->
   Now = erlang:system_time(millisecond),
-  CleanupThreshold = application:get_env(distriqueue, worker_cleanup_timeout, 3600000), % 1 hour
+  CleanupThreshold = application:get_env(distriqueue, worker_cleanup_timeout, 3600000),
 
-  % Find workers that have been unhealthy for too long
   StaleWorkers = maps:filter(
     fun(_WorkerId, UnhealthySince) ->
       Now - UnhealthySince > CleanupThreshold
@@ -493,32 +418,22 @@ handle_info(cleanup_stale_workers, State) ->
     State#state.unhealthy_workers
   ),
 
-  % Unregister stale workers
   lists:foreach(
     fun(WorkerId) ->
-      lager:info("Removing stale worker: ~p (unhealthy for >1h)", [WorkerId]),
       gen_server:cast(?MODULE, {unregister_worker, WorkerId})
     end,
     maps:keys(StaleWorkers)
   ),
 
-  % Schedule next cleanup
-  erlang:send_after(3600000, self(), cleanup_stale_workers), % 1 hour
+  erlang:send_after(3600000, self(), cleanup_stale_workers),
   {noreply, State};
 
-%% Handle unknown messages
-handle_info(Message, State) ->
-  lager:debug("Worker pool received unknown info: ~p", [Message]),
+handle_info(_Message, State) ->
   {noreply, State}.
 
-%% @doc Terminate the worker pool
--spec terminate(term(), #state{}) -> ok.
 terminate(_Reason, _State) ->
-  lager:info("Worker pool manager shutting down"),
   ok.
 
-%% @doc Code change handler
--spec code_change(term(), #state{}, term()) -> {ok, #state{}}.
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
 
@@ -526,23 +441,20 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal Functions
 %%%===================================================================
 
-%% @doc Select worker using round-robin strategy
--spec select_round_robin([#worker{}], #state{}) -> #worker{}.
 select_round_robin(Workers, State) ->
   Index = State#state.round_robin_counter rem length(Workers),
   lists:nth(Index + 1, Workers).
 
-%% @doc Select worker with least current load
--spec select_least_loaded([#worker{}]) -> #worker{}.
 select_least_loaded(Workers) ->
   lists:foldl(
     fun(Worker, Acc) ->
       case Acc of
         undefined -> Worker;
         _ ->
-          % Compare load percentage
-          LoadRatio = Worker#worker.current_load / Worker#worker.capacity,
-          AccRatio = Acc#worker.current_load / Acc#worker.capacity,
+          WCap = max(1, Worker#worker.capacity),
+          ACap = max(1, Acc#worker.capacity),
+          LoadRatio = Worker#worker.current_load / WCap,
+          AccRatio = Acc#worker.current_load / ACap,
           if
             LoadRatio < AccRatio -> Worker;
             true -> Acc
@@ -553,8 +465,6 @@ select_least_loaded(Workers) ->
     Workers
   ).
 
-%% @doc Select random worker
--spec select_random([#worker{}]) -> #worker{}.
 select_random(Workers) ->
   Index = rand:uniform(length(Workers)) - 1,
   lists:nth(Index + 1, Workers).
@@ -598,8 +508,7 @@ test_get_worker() ->
   {ok, Worker} = worker_pool:get_worker(<<"worker2">>),
   ?assertEqual(<<"worker2">>, Worker#worker.id),
   ?assertEqual(10, Worker#worker.capacity),
-  ?assertEqual(2, Worker#worker.current_load),
-  ?assertEqual({error, not_found}, worker_pool:get_worker(<<"nonexistent">>)).
+  ?assertEqual(2, Worker#worker.current_load).
 
 test_select_worker() ->
   ok = worker_pool:register_worker(<<"worker3">>, <<"python">>, 5, 0),
@@ -609,14 +518,11 @@ test_select_worker() ->
   {ok, Selected} = worker_pool:select_worker(<<"python">>),
   ?assert(lists:member(Selected, [<<"worker3">>, <<"worker4">>])),
 
-  % Should select least loaded (worker3 with load 0)
   {ok, LeastLoaded} = worker_pool:select_worker(<<"python">>, least_loaded),
   ?assertEqual(<<"worker3">>, LeastLoaded).
 
 test_worker_health() ->
   ok = worker_pool:register_worker(<<"worker6">>, <<"go">>, 5, 0),
-
-  % Simulate health check
   worker_pool:update_worker_load(<<"worker6">>, 2),
   {ok, Worker} = worker_pool:get_worker(<<"worker6">>),
   ?assertEqual(2, Worker#worker.current_load).

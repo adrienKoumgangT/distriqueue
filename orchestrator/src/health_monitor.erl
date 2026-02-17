@@ -2,7 +2,7 @@
 %%% @author adrien koumgang tegantchouang
 %%% @copyright (C) 2026, University of Pise
 %%% @doc
-%%%
+%%% System health and node monitoring
 %%% @end
 %%%-------------------------------------------------------------------
 -module(health_monitor).
@@ -17,9 +17,9 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(state, {
-  node_health = #{},
-  last_check,
-  check_interval = 30000 % 30 seconds
+  node_health = #{} :: map(),
+  last_check :: integer() | undefined,
+  check_interval = 30000 :: integer() % 30 seconds
 }).
 
 %%% PUBLIC API %%%
@@ -44,7 +44,10 @@ handle_call(get_system_health, _From, State) ->
 
 handle_call({get_node_health, Node}, _From, State) ->
   Health = maps:get(Node, State#state.node_health, #{status => unknown}),
-  {reply, {ok, Health}, State}.
+  {reply, {ok, Health}, State};
+
+handle_call(_Request, _From, State) ->
+  {reply, ok, State}.
 
 handle_cast(_Msg, State) ->
   {noreply, State}.
@@ -65,7 +68,14 @@ handle_info(check_health, State) ->
   % Schedule next check
   erlang:send_after(State#state.check_interval, self(), check_health),
 
-  {noreply, State#state{node_health = AllHealth}}.
+  {noreply, State#state{
+    node_health = AllHealth,
+    last_check = erlang:system_time(millisecond)
+  }};
+
+%% FIX: Added catch-all to prevent crashes on unknown messages
+handle_info(_Info, State) ->
+  {noreply, State}.
 
 %%% INTERNAL FUNCTIONS %%%
 check_local_health() ->
@@ -81,7 +91,7 @@ check_local_health() ->
 check_remote_health(Node) ->
   case rpc:call(Node, health_monitor, get_system_health, []) of
     {ok, Health} ->
-      maps:get(node(), Health, #{status => unknown});
+      maps:get(Node, Health, #{status => unknown});
     _ ->
       #{status => unreachable}
   end.

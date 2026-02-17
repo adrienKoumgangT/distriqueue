@@ -2,7 +2,7 @@
 %%% @author adrien koumgang tegantchouang
 %%% @copyright (C) 2026, University Of Pise
 %%% @doc
-%%%
+%%% Job Registry for DistriQueue
 %%% @end
 %%%-------------------------------------------------------------------
 -module(job_registry).
@@ -25,6 +25,7 @@
   cancel_job_rpc/1,
   get_job_rpc/1]).
 
+%% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(job, {
@@ -46,10 +47,10 @@
 }).
 
 -record(state, {
-  jobs = #{},
+  jobs = #{} :: map(),
   crdt_state = orddict:new(),
-  by_status = #{},
-  by_worker = #{}
+  by_status = #{} :: map(),
+  by_worker = #{} :: map()
 }).
 
 %%% PUBLIC API %%%
@@ -88,7 +89,10 @@ register_job_rpc([{register_job, JobId, JobType, Priority, Payload, Timeout, Max
     max_retries => MaxRetries,
     created_at => erlang:system_time(millisecond)
   },
-  register_job(Job).
+  case register_job(Job) of
+    ok -> {ok, <<"Job registered">>};
+    Error -> {error, Error}
+  end.
 
 update_status_rpc([{update_status, JobId, Status, WorkerId, _Timestamp}]) ->
   update_status(JobId, Status, WorkerId),
@@ -109,35 +113,31 @@ init([]) ->
   {ok, #state{}}.
 
 handle_call({register_job, JobMap}, _From, State) ->
-  JobId = maps:get(id, JobMap),
+  JobId = maps:get(id, JobMap, maps:get(<<"id">>, JobMap, <<"unknown_id">>)),
 
   Job = #job{
     id = JobId,
-    type = maps:get(type, JobMap),
-    priority = maps:get(priority, JobMap, 5),
-    payload = maps:get(payload, JobMap, #{}),
+    type = maps:get(type, JobMap, maps:get(<<"type">>, JobMap, <<"unknown">>)),
+    priority = maps:get(priority, JobMap, maps:get(<<"priority">>, JobMap, 5)),
+    payload = maps:get(payload, JobMap, maps:get(<<"payload">>, JobMap, #{})),
     max_retries = maps:get(max_retries, JobMap, 3),
     execution_timeout = maps:get(execution_timeout, JobMap, 300),
     created_at = maps:get(created_at, JobMap, erlang:system_time(millisecond)),
     metadata = maps:get(metadata, JobMap, #{})
   },
 
-  % Update job map
-  NewJobs = State#state.jobs#{JobId => Job},
+  CurrentJobs = State#state.jobs,
+  NewJobs = CurrentJobs#{JobId => Job},
 
-  % Update status index
   Status = Job#job.status,
-  StatusJobs = maps:get(Status, State#state.by_status, []),
-  NewByStatus = State#state.by_status#{Status => [JobId | StatusJobs]},
+  CurrentByStatus = State#state.by_status,
+  StatusJobs = maps:get(Status, CurrentByStatus, []),
+  NewByStatus = CurrentByStatus#{Status => [JobId | StatusJobs]},
 
-  % Update CRDT state
   Timestamp = erlang:system_time(microsecond),
   NewCRDT = orddict:store(JobId, {Timestamp, added}, State#state.crdt_state),
 
-  % Route to appropriate queue
   router:route_job(Job),
-
-  % Broadcast to other nodes
   broadcast_job_update(Job),
 
   NewState = State#state{
@@ -163,19 +163,28 @@ handle_call(get_all_jobs, _From, State) ->
 
 handle_call({find_by_status, Status}, _From, State) ->
   JobIds = maps:get(Status, State#state.by_status, []),
-  Jobs = lists:map(
+  Jobs = lists:filtermap(
     fun(JobId) ->
-      maps:get(JobId, State#state.jobs)
+      case maps:find(JobId, State#state.jobs) of
+        {ok, Job} -> {true, Job};
+        error -> false
+      end
     end, JobIds),
   {reply, {ok, Jobs}, State};
 
 handle_call({find_by_worker, WorkerId}, _From, State) ->
   WorkerJobs = maps:get(WorkerId, State#state.by_worker, []),
-  Jobs = lists:map(
+  Jobs = lists:filtermap(
     fun(JobId) ->
-      maps:get(JobId, State#state.jobs)
+      case maps:find(JobId, State#state.jobs) of
+        {ok, Job} -> {true, Job};
+        error -> false
+      end
     end, WorkerJobs),
-  {reply, {ok, Jobs}, State}.
+  {reply, {ok, Jobs}, State};
+
+handle_call(_Request, _From, State) ->
+  {reply, ok, State}.
 
 handle_cast({update_status, JobId, Status, WorkerId}, State) ->
   case maps:get(JobId, State#state.jobs, not_found) of
@@ -184,45 +193,24 @@ handle_cast({update_status, JobId, Status, WorkerId}, State) ->
     Job ->
       OldStatus = Job#job.status,
       OldWorkerId = Job#job.worker_id,
-
-      % Update job
       Now = erlang:system_time(millisecond),
+
       UpdatedJob = case Status of
                      running ->
-                       Job#job{
-                         status = running,
-                         worker_id = WorkerId,
-                         started_at = Now
-                       };
+                       Job#job{status = running, worker_id = WorkerId, started_at = Now};
                      completed ->
-                       Job#job{
-                         status = completed,
-                         worker_id = WorkerId,
-                         completed_at = Now
-                       };
+                       Job#job{status = completed, worker_id = WorkerId, completed_at = Now};
                      failed ->
-                       Job#job{
-                         status = failed,
-                         worker_id = WorkerId,
-                         completed_at = Now
-                       };
+                       Job#job{status = failed, worker_id = WorkerId, completed_at = Now};
                      _ ->
-                       Job#job{
-                         status = Status,
-                         worker_id = WorkerId
-                       }
+                       Job#job{status = Status, worker_id = WorkerId}
                    end,
 
-      % Update job map
-      NewJobs = State#state.jobs#{JobId => UpdatedJob},
+      CurrentJobs = State#state.jobs,
+      NewJobs = CurrentJobs#{JobId => UpdatedJob},
 
-      % Update status index
-      NewByStatus = update_index(State#state.by_status,
-        OldStatus, Status, JobId),
-
-      % Update worker index
-      NewByWorker = update_worker_index(State#state.by_worker,
-        OldWorkerId, WorkerId, JobId),
+      NewByStatus = update_index(State#state.by_status, OldStatus, Status, JobId),
+      NewByWorker = update_worker_index(State#state.by_worker, OldWorkerId, WorkerId, JobId),
 
       NewState = State#state{
         jobs = NewJobs,
@@ -230,9 +218,7 @@ handle_cast({update_status, JobId, Status, WorkerId}, State) ->
         by_worker = NewByWorker
       },
 
-      % Broadcast update
       broadcast_job_update(UpdatedJob),
-
       lager:info("Job ~p status changed from ~p to ~p, worker: ~p",
         [JobId, OldStatus, Status, WorkerId]),
 
@@ -244,21 +230,18 @@ handle_cast({cancel_job, JobId}, State) ->
     not_found ->
       {noreply, State};
     Job ->
-      % Remove from queue
       rabbitmq_client:cancel_job(JobId),
 
-      % Update job
       UpdatedJob = Job#job{
         status = cancelled,
         completed_at = erlang:system_time(millisecond)
       },
 
-      NewJobs = State#state.jobs#{JobId => UpdatedJob},
+      CurrentJobs = State#state.jobs,
+      NewJobs = CurrentJobs#{JobId => UpdatedJob},
 
-      % Update status index
       OldStatus = Job#job.status,
-      NewByStatus = update_index(State#state.by_status,
-        OldStatus, cancelled, JobId),
+      NewByStatus = update_index(State#state.by_status, OldStatus, cancelled, JobId),
 
       NewState = State#state{
         jobs = NewJobs,
@@ -266,25 +249,25 @@ handle_cast({cancel_job, JobId}, State) ->
       },
 
       broadcast_job_update(UpdatedJob),
-
       lager:info("Job ~p cancelled", [JobId]),
 
       {noreply, NewState}
   end;
 
 handle_cast({sync_job, Job}, State) ->
-  % Received from another node
   JobId = Job#job.id,
-  NewJobs = State#state.jobs#{JobId => Job},
+  CurrentJobs = State#state.jobs,
+  NewJobs = CurrentJobs#{JobId => Job},
 
-  % Update indices
   Status = Job#job.status,
-  StatusJobs = maps:get(Status, State#state.by_status, []),
-  NewByStatus = State#state.by_status#{Status => [JobId | StatusJobs]},
+  CurrentByStatus = State#state.by_status,
+  StatusJobs = maps:get(Status, CurrentByStatus, []),
+  NewByStatus = CurrentByStatus#{Status => lists:usort([JobId | StatusJobs])},
 
   WorkerId = Job#job.worker_id,
-  WorkerJobs = maps:get(WorkerId, State#state.by_worker, []),
-  NewByWorker = State#state.by_worker#{WorkerId => [JobId | WorkerJobs]},
+  CurrentByWorker = State#state.by_worker,
+  WorkerJobs = maps:get(WorkerId, CurrentByWorker, []),
+  NewByWorker = CurrentByWorker#{WorkerId => lists:usort([JobId | WorkerJobs])},
 
   NewState = State#state{
     jobs = NewJobs,
@@ -292,37 +275,34 @@ handle_cast({sync_job, Job}, State) ->
     by_worker = NewByWorker
   },
 
-  {noreply, NewState}.
+  {noreply, NewState};
+
+handle_cast(_Msg, State) ->
+  {noreply, State}.
 
 handle_info(_Info, State) ->
   {noreply, State}.
 
 %%% INTERNAL FUNCTIONS %%%
 update_index(ByStatus, OldStatus, NewStatus, JobId) ->
-  % Remove from old status
   ByStatus1 = case OldStatus of
                 undefined -> ByStatus;
                 _ ->
                   OldJobs = maps:get(OldStatus, ByStatus, []),
                   ByStatus#{OldStatus => lists:delete(JobId, OldJobs)}
               end,
-
-  % Add to new status
   NewJobs = maps:get(NewStatus, ByStatus1, []),
-  ByStatus1#{NewStatus => [JobId | NewJobs]}.
+  ByStatus1#{NewStatus => lists:usort([JobId | NewJobs])}.
 
 update_worker_index(ByWorker, OldWorkerId, NewWorkerId, JobId) ->
-  % Remove from old worker
   ByWorker1 = case OldWorkerId of
                 none -> ByWorker;
                 _ ->
                   OldJobs = maps:get(OldWorkerId, ByWorker, []),
                   ByWorker#{OldWorkerId => lists:delete(JobId, OldJobs)}
               end,
-
-  % Add to new worker
   NewJobs = maps:get(NewWorkerId, ByWorker1, []),
-  ByWorker1#{NewWorkerId => [JobId | NewJobs]}.
+  ByWorker1#{NewWorkerId => lists:usort([JobId | NewJobs])}.
 
 broadcast_job_update(Job) ->
   Nodes = [N || N <- nodes(), N /= node()],
