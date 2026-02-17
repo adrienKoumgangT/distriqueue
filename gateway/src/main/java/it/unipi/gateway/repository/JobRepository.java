@@ -162,23 +162,23 @@ public interface JobRepository extends JpaRepository<Job, String> {
     List<Object[]> countJobsByWorker();
 
     /// Average execution time
-    @Query("""
+    @Query(value ="""
             SELECT AVG(TIMESTAMPDIFF(MILLISECOND, j.startedAt, j.completedAt))
             FROM Job j
             WHERE j.status = 'COMPLETED'
                 AND j.startedAt IS NOT NULL
                 AND j.completedAt IS NOT NULL
-            """)
+            """, nativeQuery = true)
     Double getAverageExecutionTimeMs();
 
     /// Average queue time
-    @Query("""
+    @Query(value ="""
             SELECT AVG(TIMESTAMPDIFF(MILLISECOND, j.createdAt, j.startedAt))
             FROM Job j
             WHERE j.status IN ('COMPLETED', 'FAILED', 'TIMEOUT')
                 AND j.createdAt IS NOT NULL
                 AND j.startedAt IS NOT NULL
-            """)
+            """, nativeQuery = true)
     Double getAverageQueueTimeMs();
 
     /// Success rate by job type
