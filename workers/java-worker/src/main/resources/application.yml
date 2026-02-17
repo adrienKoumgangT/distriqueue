@@ -4,8 +4,9 @@ spring:
 
   # RabbitMQ Configuration
   rabbitmq:
-    host: ${RABBITMQ_HOST:rabbitmq1}
-    port: ${RABBITMQ_PORT:5672}
+    # host: ${RABBITMQ_HOST:rabbitmq1}
+    # port: ${RABBITMQ_PORT:5672}
+    addresses: ${RABBITMQ_ADDRESSES:10.2.1.11:5672,10.2.1.12:5672}
     username: ${RABBITMQ_USERNAME:admin}
     password: ${RABBITMQ_PASSWORD:admin}
     connection-timeout: 5s

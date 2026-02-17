@@ -103,7 +103,7 @@ public class RabbitMQConfig {
         args.put("x-max-priority", 10);
         args.put("x-dead-letter-exchange", "");
         args.put("x-dead-letter-routing-key", "job.dead-letter");
-        return QueueBuilder.durable("job.high").withArguments(args).build();
+        return QueueBuilder.durable("job.high").withArguments(args).quorum().build();
     }
 
     @Bean
@@ -112,7 +112,7 @@ public class RabbitMQConfig {
         args.put("x-max-priority", 5);
         args.put("x-dead-letter-exchange", "");
         args.put("x-dead-letter-routing-key", "job.dead-letter");
-        return QueueBuilder.durable("job.medium").withArguments(args).build();
+        return QueueBuilder.durable("job.medium").withArguments(args).quorum().build();
     }
 
     @Bean
@@ -121,12 +121,12 @@ public class RabbitMQConfig {
         args.put("x-max-priority", 1);
         args.put("x-dead-letter-exchange", "");
         args.put("x-dead-letter-routing-key", "job.dead-letter");
-        return QueueBuilder.durable("job.low").withArguments(args).build();
+        return QueueBuilder.durable("job.low").withArguments(args).quorum().build();
     }
 
     @Bean
     public Queue deadLetterQueue() {
-        return QueueBuilder.durable("job.dead-letter").build();
+        return QueueBuilder.durable("job.dead-letter").quorum().build();
     }
 
     @Bean

@@ -4,12 +4,18 @@ spring:
     name: gateway
   
   rabbitmq:
-    host: ${RABBITMQ_HOST:rabbitmq1}
-    port: ${RABBITMQ_PORT:5672}
+    # host: ${RABBITMQ_HOST:rabbitmq1}
+    # port: ${RABBITMQ_PORT:5672}
+    addresses: ${RABBITMQ_ADDRESSES:10.2.1.11:5672,10.2.1.12:5672}
     username: ${RABBITMQ_USERNAME:admin}
     password: ${RABBITMQ_PASSWORD:admin}
     virtual-host: /
     connection-timeout: 5000
+    template:
+      retry:
+        enabled: true
+        initial-interval: 1000ms
+        max-attempts: 3
     listener:
       simple:
         prefetch: 10
@@ -54,9 +60,14 @@ spring:
     time-zone: UTC
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
+      host: ${REDIS_HOST:10.2.1.11}
       port: ${REDIS_PORT:6379}
-      database: 0
+      # database: 0
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
   web:
     error:
       include-message: always
@@ -71,10 +82,10 @@ server:
 
 distriqueue:
   erlang:
-    nodes: ${ERLANG_NODES:orchestrator1@distriqueue,orchestrator2@distriqueue}
+    nodes: ${ERLANG_NODES:orchestrator@Adrien0,orchestrator@Adrien1}
     rest:
       port: ${ERLANG_REST_PORT:8081}
-    cookie: ${ERLANG_COOKIE:distriqueue-cookie}
+    cookie: ${ERLANG_COOKIE:VANQLBWBSYTBKENFPEWC}
   
   job:
     default-timeout: ${JOB_DEFAULT_TIMEOUT:300}

@@ -20,6 +20,7 @@ public class RabbitMQConfig {
     public Queue highPriorityQueue() {
         return QueueBuilder.durable(HIGH_PRIORITY_QUEUE)
                 .maxPriority(10)
+                .quorum()
                 .build();
     }
 
@@ -27,6 +28,7 @@ public class RabbitMQConfig {
     public Queue mediumPriorityQueue() {
         return QueueBuilder.durable(MEDIUM_PRIORITY_QUEUE)
                 .maxPriority(5)
+                .quorum()
                 .build();
     }
 
@@ -34,6 +36,7 @@ public class RabbitMQConfig {
     public Queue lowPriorityQueue() {
         return QueueBuilder.durable(LOW_PRIORITY_QUEUE)
                 .maxPriority(1)
+                .quorum()
                 .build();
     }
 
