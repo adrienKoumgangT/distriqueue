@@ -178,7 +178,7 @@ setup_infrastructure(Channel) ->
 
   lists:foreach(
     fun({Queue, Priority}) ->
-      Args = #{<<"x-max-priority">> => Priority},
+      Args = [{<<"x-max-priority">>, signedint, Priority}],
       amqp_channel:call(Channel,
         #'queue.declare'{
           queue = Queue,
