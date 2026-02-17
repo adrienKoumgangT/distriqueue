@@ -5,7 +5,7 @@
 %%% Worker Pool Manager - Manages worker registration, health monitoring,
 %%% and load balancing for the DistriQueue distributed job scheduler.
 %%%-------------------------------------------------------------------
--module(worker_pool).
+-module(dq_worker_pool).
 -author("adrienkt").
 -behaviour(gen_server).
 
@@ -489,42 +489,42 @@ worker_pool_test_() ->
 
 setup() ->
   application:ensure_all_started(distriqueue),
-  {ok, _} = worker_pool:start_link(),
+  {ok, _} = dq_worker_pool:start_link(),
   ok.
 
 cleanup(_) ->
   gen_server:stop(worker_pool).
 
 test_register_worker() ->
-  ok = worker_pool:register_worker(<<"worker1">>, <<"python">>, 5, 0),
-  {ok, Worker} = worker_pool:get_worker(<<"worker1">>),
+  ok = dq_worker_pool:register_worker(<<"worker1">>, <<"python">>, 5, 0),
+  {ok, Worker} = dq_worker_pool:get_worker(<<"worker1">>),
   ?assertEqual(<<"worker1">>, Worker#worker.id),
   ?assertEqual(<<"python">>, Worker#worker.type),
   ?assertEqual(5, Worker#worker.capacity),
   ?assertEqual(0, Worker#worker.current_load).
 
 test_get_worker() ->
-  ok = worker_pool:register_worker(<<"worker2">>, <<"java">>, 10, 2),
-  {ok, Worker} = worker_pool:get_worker(<<"worker2">>),
+  ok = dq_worker_pool:register_worker(<<"worker2">>, <<"java">>, 10, 2),
+  {ok, Worker} = dq_worker_pool:get_worker(<<"worker2">>),
   ?assertEqual(<<"worker2">>, Worker#worker.id),
   ?assertEqual(10, Worker#worker.capacity),
   ?assertEqual(2, Worker#worker.current_load).
 
 test_select_worker() ->
-  ok = worker_pool:register_worker(<<"worker3">>, <<"python">>, 5, 0),
-  ok = worker_pool:register_worker(<<"worker4">>, <<"python">>, 5, 3),
-  ok = worker_pool:register_worker(<<"worker5">>, <<"java">>, 10, 1),
+  ok = dq_worker_pool:register_worker(<<"worker3">>, <<"python">>, 5, 0),
+  ok = dq_worker_pool:register_worker(<<"worker4">>, <<"python">>, 5, 3),
+  ok = dq_worker_pool:register_worker(<<"worker5">>, <<"java">>, 10, 1),
 
-  {ok, Selected} = worker_pool:select_worker(<<"python">>),
+  {ok, Selected} = dq_worker_pool:select_worker(<<"python">>),
   ?assert(lists:member(Selected, [<<"worker3">>, <<"worker4">>])),
 
-  {ok, LeastLoaded} = worker_pool:select_worker(<<"python">>, least_loaded),
+  {ok, LeastLoaded} = dq_worker_pool:select_worker(<<"python">>, least_loaded),
   ?assertEqual(<<"worker3">>, LeastLoaded).
 
 test_worker_health() ->
-  ok = worker_pool:register_worker(<<"worker6">>, <<"go">>, 5, 0),
-  worker_pool:update_worker_load(<<"worker6">>, 2),
-  {ok, Worker} = worker_pool:get_worker(<<"worker6">>),
+  ok = dq_worker_pool:register_worker(<<"worker6">>, <<"go">>, 5, 0),
+  dq_worker_pool:update_worker_load(<<"worker6">>, 2),
+  {ok, Worker} = dq_worker_pool:get_worker(<<"worker6">>),
   ?assertEqual(2, Worker#worker.current_load).
 
 -endif.

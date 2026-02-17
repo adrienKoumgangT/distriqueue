@@ -11,6 +11,8 @@
         inets,
         ssl,
         ranch,
+        jsx,
+        lager,
         cowboy,
         amqp_client
       ]},

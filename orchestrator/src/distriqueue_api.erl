@@ -498,7 +498,7 @@ handle_worker_heartbeat(Req, State) ->
         CurrentLoad = maps:get(<<"current_load">>, Heartbeat, 0),
 
         % Register/update worker in pool
-        worker_pool:register_worker(WorkerId, WorkerType, Capacity, CurrentLoad),
+        dq_worker_pool:register_worker(WorkerId, WorkerType, Capacity, CurrentLoad),
 
         % Update metrics
         metrics_exporter:set_gauge(<<"worker_capacity">>, Capacity),
@@ -548,7 +548,7 @@ handle_metrics(Req, State) ->
     end, #{}, Jobs),
 
   % Get worker statistics
-  {ok, Workers} = worker_pool:get_all_workers(),
+  {ok, Workers} = dq_worker_pool:get_all_workers(),
 
   % Format Prometheus metrics
   Metrics = [

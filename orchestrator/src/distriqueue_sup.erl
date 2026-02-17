@@ -54,8 +54,8 @@ init([]) ->
     },
 
     #{
-      id => worker_pool,
-      start => {worker_pool, start_link, []},
+      id => dq_worker_pool,
+      start => {dq_worker_pool, start_link, []},
       restart => permanent,
       shutdown => 5000,
       type => worker
