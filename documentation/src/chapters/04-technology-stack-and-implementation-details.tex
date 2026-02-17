@@ -157,3 +157,50 @@ CREATE INDEX idx_job_worker ON jobs(worker_id);
 
 
 
+\section{Quick Start Guide}\label{sec:quick-start-guide}
+
+\subsection{Access Points}\label{subsec:access-points}
+
+\begin{tabular}{l l l}
+    Service & Adrien0 (10.2.1.11) & Adrien1 (10.2.1.12) \\
+    API Gateway & http://10.2.1.11 & http://10.2.1.12 \\
+    Load Balancer & http://10.2.1.11 (port 80) & - \\
+    H2 Console & http://10.1.2.11:8082/h2-console & http://10.1.2.12:8082/h2-console \\
+    RabbitMQ UI & http://10.1.2.11:15672 & http://10.1.2.12:15672 \\
+    Node Exporter & http://10.2.1.11:9100 & http://10.2.1.4:9100 \\
+\end{tabular}
+
+
+\textbf{Credentials}:
+\begin{itemize}
+    \item RabbitMQ: admin / admin
+    \item H2 Database: sa / (empty)
+    \item Redis: (empty)
+\end{itemize}
+
+
+\subsection{Useful Commands}\label{subsec:useful-commands}
+
+\begin{lstlisting}[language=Bash, caption={Useful Commands}, label={lst:useful-commands}]
+# Check all services
+systemctl status 'distriqueue-*'
+
+# View logs
+journalctl -u distriqueue-orchestrator -f
+journalctl -u distriqueue-api -f
+journalctl -u distriqueue-python-worker -f
+
+# Monitor resource usage
+htop
+free -h
+df -h
+
+# Check RabbitMQ queues
+rabbitmqctl list_queues -p jobs
+rabbitmqctl list_queues -p jobs messages
+
+# Check Redis
+redis-cli ping
+redis-cli info stats
+\end{lstlisting}
+

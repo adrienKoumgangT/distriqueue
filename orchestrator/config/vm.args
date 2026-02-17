@@ -1,9 +1,9 @@
 %% orchestrator/config/vm.args
 ## Name of the node
--name ${NODE_NAME:-orchestrator1@distriqueue}
+-name ${NODE_NAME:-orchestrator@Adrien0}
 
 ## Cookie for distributed erlang
--setcookie ${COOKIE:-distriqueue-cookie}
+-setcookie ${COOKIE:-VANQLBWBSYTBKENFPEWC}
 
 ## Heartbeat management; auto-restarts VM if it dies or becomes unresponsive
 -heart

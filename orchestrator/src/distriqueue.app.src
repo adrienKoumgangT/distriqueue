@@ -16,8 +16,8 @@
       ]},
     {env, [
       {node_name, undefined},
-      {cookie, "distriqueue-cookie"},
-      {rabbitmq_host, "rabbitmq1"},
+      {cookie, "VANQLBWBSYTBKENFPEWC"},
+      {rabbitmq_host, "10.2.1.11"},
       {rabbitmq_port, 5672},
       {rabbitmq_username, "admin"},
       {rabbitmq_password, "admin"},
