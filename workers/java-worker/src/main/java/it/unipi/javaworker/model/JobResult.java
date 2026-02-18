@@ -21,7 +21,7 @@ public class JobResult {
     private Integer progress;
     private Long executionTimeMs;
     private Long memoryUsageMb;
-    private LocalDateTime completedAt;
+    private String completedAt;
     private Map<String, Object> metadata;
 
     public static JobResult success(String jobId, String workerId, Map<String, Object> result) {
@@ -30,7 +30,7 @@ public class JobResult {
                 .status(Job.Statuses.COMPLETED)
                 .workerId(workerId)
                 .result(result)
-                .completedAt(LocalDateTime.now())
+                .completedAt(LocalDateTime.now().toString())
                 .build();
     }
 
@@ -40,7 +40,7 @@ public class JobResult {
                 .status(Job.Statuses.FAILED)
                 .workerId(workerId)
                 .errorMessage(errorMessage)
-                .completedAt(LocalDateTime.now())
+                .completedAt(LocalDateTime.now().toString())
                 .build();
     }
 

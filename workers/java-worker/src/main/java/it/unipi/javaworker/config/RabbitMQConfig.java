@@ -26,11 +26,9 @@ import java.util.Map;
 @Configuration
 public class RabbitMQConfig {
 
-    @Value("${spring.rabbitmq.host:rabbitmq1}")
-    private String host;
-
-    @Value("${spring.rabbitmq.port:5672}")
-    private int port;
+    // Using addresses instead of host/port to support multiple nodes
+    @Value("${spring.rabbitmq.addresses:10.2.1.11:5672,10.2.1.12:5672}")
+    private String addresses;
 
     @Value("${spring.rabbitmq.username:admin}")
     private String username;
@@ -57,8 +55,9 @@ public class RabbitMQConfig {
     @Bean
     public ConnectionFactory connectionFactory() {
         CachingConnectionFactory cf = new CachingConnectionFactory();
-        cf.setHost(host);
-        cf.setPort(port);
+
+        // Use setAddresses to support the comma-separated list
+        cf.setAddresses(addresses);
         cf.setUsername(username);
         cf.setPassword(password);
 
@@ -66,7 +65,7 @@ public class RabbitMQConfig {
         cf.setPublisherReturns(true);
         cf.setPublisherConfirmType(CachingConnectionFactory.ConfirmType.CORRELATED);
 
-        // milliseconds (5ms was almost certainly not intended)
+        // milliseconds
         cf.setConnectionTimeout(5000);
 
         return cf;
@@ -97,36 +96,27 @@ public class RabbitMQConfig {
                 .build();
     }
 
+    // Queues adjusted to match the Erlang Orchestrator preconditions exactly
+    // (Classic queues, no dead-letter exchange, x-max-priority only)
     @Bean
     public Queue highPriorityQueue() {
         Map<String, Object> args = new HashMap<>();
         args.put("x-max-priority", 10);
-        args.put("x-dead-letter-exchange", "");
-        args.put("x-dead-letter-routing-key", "job.dead-letter");
-        return QueueBuilder.durable("job.high").withArguments(args).quorum().build();
+        return QueueBuilder.durable("job.high").withArguments(args).build();
     }
 
     @Bean
     public Queue mediumPriorityQueue() {
         Map<String, Object> args = new HashMap<>();
         args.put("x-max-priority", 5);
-        args.put("x-dead-letter-exchange", "");
-        args.put("x-dead-letter-routing-key", "job.dead-letter");
-        return QueueBuilder.durable("job.medium").withArguments(args).quorum().build();
+        return QueueBuilder.durable("job.medium").withArguments(args).build();
     }
 
     @Bean
     public Queue lowPriorityQueue() {
         Map<String, Object> args = new HashMap<>();
         args.put("x-max-priority", 1);
-        args.put("x-dead-letter-exchange", "");
-        args.put("x-dead-letter-routing-key", "job.dead-letter");
-        return QueueBuilder.durable("job.low").withArguments(args).quorum().build();
-    }
-
-    @Bean
-    public Queue deadLetterQueue() {
-        return QueueBuilder.durable("job.dead-letter").quorum().build();
+        return QueueBuilder.durable("job.low").withArguments(args).build();
     }
 
     @Bean
@@ -147,14 +137,10 @@ public class RabbitMQConfig {
                 .to(jobsExchange()).with("job.low");
     }
 
-    /**
-     * FIX (Boot 4 / AMQP 4):
-     * Use Spring AMQP RetryInterceptorBuilder (backed by Spring Framework core retry).
-     */
     @Bean
     public Advice retryAdvice() {
         return RetryInterceptorBuilder.stateless()
-                .maxRetries(maxRetries) // total attempts = 1 + maxRetries :contentReference[oaicite:3]{index=3}
+                .maxRetries(maxRetries)
                 .backOffOptions(initialInterval, multiplier, maxInterval)
                 .recoverer(new RejectAndDontRequeueRecoverer())
                 .build();
@@ -172,6 +158,8 @@ public class RabbitMQConfig {
         factory.setConcurrentConsumers(3);
         factory.setMaxConcurrentConsumers(10);
         factory.setPrefetchCount(1);
+
+        factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
 
         factory.setDefaultRequeueRejected(false);
 

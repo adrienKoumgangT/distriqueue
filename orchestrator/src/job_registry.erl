@@ -13,6 +13,7 @@
 -export([start_link/0,
   register_job/1,
   update_status/3,
+  update_job_result/4,
   cancel_job/1,
   get_job/1,
   get_all_jobs/0,
@@ -97,6 +98,24 @@ get_job_rpc([JobId]) ->
 %%% GEN_SERVER CALLBACKS %%%
 init([]) ->
   {ok, #state{}}.
+
+update_job_result(JobId, Status, WorkerId, Result) ->
+  gen_server:call(?MODULE, {update_job_result, JobId, Status, WorkerId, Result}).
+
+handle_call({update_job_result, JobId, Status, WorkerId, Result}, _From, State) ->
+  case get_job(JobId) of
+    {ok, Job} ->
+      UpdatedJob = Job#job{
+        status = Status,
+        worker_id = WorkerId,
+        result = Result,
+        completed_at = erlang:system_time(millisecond)
+      },
+      mnesia:dirty_write(jobs, UpdatedJob),
+      {reply, ok, State};
+    error ->
+      {reply, {error, not_found}, State}
+  end;
 
 handle_call({register_job, JobMap}, _From, State) ->
   JobId = maps:get(id, JobMap, maps:get(<<"id">>, JobMap, <<"unknown_id">>)),

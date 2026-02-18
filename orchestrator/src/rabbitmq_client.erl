@@ -50,7 +50,7 @@ init([]) ->
   case connect_to_rabbitmq() of
     {ok, Connection, Channel} ->
       setup_infrastructure(Channel),
-      start_consumers(Channel),
+      % start_consumers(Channel),
       {ok, #state{connection = Connection, channel = Channel}};
     Error ->
       lager:error("Failed to connect to RabbitMQ: ~p", [Error]),

@@ -29,7 +29,7 @@ public class WorkerConfig {
     @Value("${distriqueue.worker.capacity}")
     private Integer capacity;
 
-    @Value("${distriqueue.worker.queues}")
+    @Value("${distriqueue.worker.queues:job.high,job.medium,job.low}")
     private List<String> queues;
 
     @Value("${distriqueue.worker.job.concurrency}")

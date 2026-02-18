@@ -1,9 +1,10 @@
 package it.unipi.javaworker.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
 
-import java.time.LocalDateTime;
 import java.util.Map;
 
 @Data
@@ -11,24 +12,50 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Job {
 
     private String id;
     private String type;
     private Integer priority;
     private String status;
+
+    @JsonProperty("worker_id")
     private String workerId;
+
     private Map<String, Object> payload;
-    private Map<String, Object> result;
+
+    // Changed to Object to safely parse the "undefined" string from Erlang
+    private Object result;
+
+    @JsonProperty("error_message")
     private String errorMessage;
+
+    @JsonProperty("retry_count")
     private Integer retryCount;
+
+    @JsonProperty("max_retries")
     private Integer maxRetries;
+
+    @JsonProperty("execution_timeout")
     private Integer executionTimeout;
-    private LocalDateTime createdAt;
-    private LocalDateTime startedAt;
-    private LocalDateTime completedAt;
+
+    // Changed to Object to safely handle Erlang timestamps or "undefined"
+    @JsonProperty("created_at")
+    private Object createdAt;
+
+    @JsonProperty("started_at")
+    private Object startedAt;
+
+    @JsonProperty("completed_at")
+    private Object completedAt;
+
     private Map<String, String> metadata;
+
+    @JsonProperty("parent_job_id")
     private String parentJobId;
+
+    @JsonProperty("callback_url")
     private String callbackUrl;
 
     // Job types
@@ -50,18 +77,9 @@ public class Job {
         public static final String CANCELLED = "cancelled";
     }
 
-    // Helper methods
-    public boolean isHighPriority() {
-        return priority != null && priority >= 10;
-    }
-
-    public boolean isMediumPriority() {
-        return priority != null && priority >= 5 && priority < 10;
-    }
-
-    public boolean isLowPriority() {
-        return priority != null && priority < 5;
-    }
+    public boolean isHighPriority() { return priority != null && priority >= 10; }
+    public boolean isMediumPriority() { return priority != null && priority >= 5 && priority < 10; }
+    public boolean isLowPriority() { return priority != null && priority < 5; }
 
     public boolean canRetry() {
         return Statuses.FAILED.equals(status) &&

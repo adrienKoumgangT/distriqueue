@@ -120,7 +120,7 @@ init(Req, raft_status) ->
   {ok, handle_raft_status(Req), raft_status};
 
 init(Req, metrics) ->
-  {ok, handle_metrics(Req), metrics}.
+  {ok, handle_metrics(Req), metrics};
 
 init(Req, worker_heartbeat) ->
   {ok, handle_worker_heartbeat(Req), worker_heartbeat}.
@@ -191,11 +191,9 @@ handle_register_job(Req) ->
 
 handle_update_job_status(Req) ->
   {ok, Body, Req1} = cowboy_req:read_body(Req),
-
   try
     Map = jsx:decode(Body, [return_maps]),
 
-    %% Support both URL parameter (/:id/status) AND JSON body ({"jobId": ...})
     JobId = case cowboy_req:binding(id, Req1) of
               undefined -> maps:get(<<"jobId">>, Map, <<"unknown">>);
               Id -> Id
@@ -203,11 +201,12 @@ handle_update_job_status(Req) ->
 
     StatusBin = maps:get(<<"status">>, Map, <<"pending">>),
     WorkerId = maps:get(<<"workerId">>, Map, <<"unknown">>),
+    ResultMap = maps:get(<<"result">>, Map, undefined),
 
-    %% Convert the JSON string status to an Erlang atom (running, completed, failed)
     StatusAtom = erlang:binary_to_atom(StatusBin, utf8),
 
-    distriqueue:update_job_status(JobId, StatusAtom, WorkerId),
+    %% Update status AND result in the registry
+    job_registry:update_job_result(JobId, StatusAtom, WorkerId, ResultMap),
 
     cowboy_req:reply(200,
       #{<<"content-type">> => <<"application/json">>},
@@ -253,7 +252,6 @@ handle_cancel_job(Req) ->
 handle_list_jobs(Req) ->
   {ok, Jobs} = job_registry:get_all_jobs(),
 
-  % Convert jobs to JSON
   JobsJson = lists:map(
     fun(Job) ->
       #{
@@ -262,6 +260,7 @@ handle_list_jobs(Req) ->
         <<"status">> => Job#job.status,
         <<"priority">> => Job#job.priority,
         <<"worker_id">> => Job#job.worker_id,
+        <<"result">> => Job#job.result,   %% <-- ADD THIS LINE
         <<"created_at">> => Job#job.created_at,
         <<"started_at">> => Job#job.started_at,
         <<"completed_at">> => Job#job.completed_at
@@ -273,9 +272,7 @@ handle_list_jobs(Req) ->
     <<"count">> => length(Jobs)
   }),
 
-  cowboy_req:reply(200,
-    #{<<"content-type">> => <<"application/json">>},
-    Response, Req).
+  cowboy_req:reply(200, #{<<"content-type">> => <<"application/json">>}, Response, Req).
 
 handle_raft_status(Req) ->
   case raft_fsm:get_state() of

@@ -49,7 +49,7 @@ public class JobConsumer {
     }
 
     @RabbitListener(
-            queues = {"${distriqueue.worker.queues}"},
+            queues = "#{'${distriqueue.worker.queues:job.high,job.medium,job.low}'.split(',')}",
             containerFactory = "rabbitListenerContainerFactory"
     )
     @Retryable(

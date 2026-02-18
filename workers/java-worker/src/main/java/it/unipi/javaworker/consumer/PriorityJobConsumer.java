@@ -4,7 +4,6 @@ import it.unipi.javaworker.model.WorkerMetrics;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -28,17 +27,17 @@ public class PriorityJobConsumer {
         log.info("PriorityJobConsumer initialized with capacity: {}", capacity);
     }
 
-    @RabbitListener(queues = "${queue.high:job.high}")
+    // @RabbitListener(queues = "${queue.high:job.high}")
     public void consumeHighPriorityJob(Object job) {
         processJob("high", job);
     }
 
-    @RabbitListener(queues = "${queue.medium:job.medium}")
+    // @RabbitListener(queues = "${queue.medium:job.medium}")
     public void consumeMediumPriorityJob(Object job) {
         processJob("medium", job);
     }
 
-    @RabbitListener(queues = "${queue.low:job.low}")
+    // @RabbitListener(queues = "${queue.low:job.low}")
     public void consumeLowPriorityJob(Object job) {
         processJob("low", job);
     }
