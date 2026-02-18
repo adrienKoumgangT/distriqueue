@@ -267,6 +267,34 @@ candidate(cast, {request_vote_reply, {vote_granted, _VoterId, _Term, false}}, St
   % Vote denied, ignore
   {keep_state, State};
 
+candidate(cast, {request_vote_rpc, CandidateId, Term, LastLogIndex, LastLogTerm}, State) ->
+  %% If the incoming candidate has a higher term, we must step down and evaluate their vote
+  if
+    Term > State#state.current_term ->
+      lager:info("Candidate ~p stepping down to follower for higher term ~p from ~p",
+        [node(), Term, CandidateId]),
+
+      %% Check log freshness
+      CanVote = (LastLogIndex >= length(State#state.log)) andalso
+        (LastLogTerm >= get_last_log_term(State#state.log)),
+
+      Reply = {vote_granted, node(), Term, CanVote},
+      gen_statem:cast({?MODULE, CandidateId}, {request_vote_reply, Reply}),
+
+      NewState = if
+                   CanVote -> State#state{current_term = Term, voted_for = CandidateId};
+                   true -> State#state{current_term = Term, voted_for = none}
+                 end,
+
+      {next_state, follower, NewState, [{state_timeout, random_election_timeout(), election_timeout}]};
+
+  %% If the term is the same or lower, reject the vote (we voted for ourselves)
+    true ->
+      Reply = {vote_granted, node(), State#state.current_term, false},
+      gen_statem:cast({?MODULE, CandidateId}, {request_vote_reply, Reply}),
+      {keep_state, State}
+  end;
+
 candidate(cast, {append_entries_rpc, LeaderId, Term, PrevLogIndex,
   PrevLogTerm, Entries, LeaderCommit}, State) ->
   % If we receive append entries from a leader with higher term, step down
@@ -387,7 +415,7 @@ leader(EventType, EventContent, State) ->
 %%% ============================================================
 
 random_election_timeout() ->
-  150 + rand:uniform(150). % 150-300ms
+  1500 + rand:uniform(1500). % 1.5 to 3s
 
 get_last_log_term([]) -> 0;
 get_last_log_term(Log) -> element(1, lists:last(Log)).

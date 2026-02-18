@@ -1,5 +1,5 @@
 ## Name of the node
--name orchestrator@Adrien0
+-name orchestrator@Adrien0.local
 
 ## Cookie for distributed erlang
 -setcookie VANQLBWBSYTBKENFPEWC
