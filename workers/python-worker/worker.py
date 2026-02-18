@@ -16,7 +16,7 @@ import signal
 import sys
 import os
 from typing import Dict, Any, Optional, List, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from queue import Queue
 from concurrent.futures import ThreadPoolExecutor, Future
 import traceback
@@ -390,13 +390,10 @@ class PythonWorker:
             durable=True
         )
 
-        # Declare queues with priorities and dead letter configuration
+        # Declare queues with the exact priorities Erlang set
         for priority, queue_name in self.queues.items():
             args = {
-                'x-max-priority': 10 if priority == 'high' else 5 if priority == 'medium' else 1,
-                'x-dead-letter-exchange': '',
-                'x-dead-letter-routing-key': 'job.dead-letter',
-                'x-queue-type': 'classic'
+                'x-max-priority': 10 if priority == 'high' else 5 if priority == 'medium' else 1
             }
 
             self.channel.queue_declare(
@@ -411,12 +408,6 @@ class PythonWorker:
                 exchange='jobs.exchange',
                 routing_key=queue_name
             )
-
-        # Declare dead letter queue
-        self.channel.queue_declare(
-            queue='job.dead-letter',
-            durable=True
-        )
 
         logger.debug("RabbitMQ setup completed")
 
@@ -514,7 +505,7 @@ class PythonWorker:
         return {
             'echo': job.get('payload', {}),
             'processed_by': self.worker_id,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
     def send_status_update(self, job_id: str, status: str,
@@ -527,7 +518,7 @@ class PythonWorker:
                 'jobId': job_id,
                 'status': status,
                 'workerId': self.worker_id,
-                'timestamp': datetime.utcnow().isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
 
             if result:

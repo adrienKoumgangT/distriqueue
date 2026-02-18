@@ -74,11 +74,13 @@ handle_info(timeout, State) ->
     {"/api/health", ?MODULE, health},
     {"/api/cluster/status", ?MODULE, cluster_status},
     {"/api/jobs/register", ?MODULE, register_job},
+    {"/api/jobs/status", ?MODULE, update_job_status},
     {"/api/jobs/:id/status", ?MODULE, update_job_status},
     {"/api/jobs/:id/cancel", ?MODULE, cancel_job},
     {"/api/jobs", ?MODULE, list_jobs},
     {"/api/raft/status", ?MODULE, raft_status},
-    {"/api/metrics", ?MODULE, metrics}
+    {"/api/metrics", ?MODULE, metrics},
+    {"/api/workers/heartbeat", ?MODULE, worker_heartbeat}
   ],
 
   Dispatch = cowboy_router:compile([{'_', Routes}]),
@@ -119,6 +121,9 @@ init(Req, raft_status) ->
 
 init(Req, metrics) ->
   {ok, handle_metrics(Req), metrics}.
+
+init(Req, worker_heartbeat) ->
+  {ok, handle_worker_heartbeat(Req), worker_heartbeat}.
 
 handle_health(Req) ->
   Status = case job_registry:get_all_jobs() of
@@ -186,17 +191,49 @@ handle_register_job(Req) ->
 
 handle_update_job_status(Req) ->
   {ok, Body, Req1} = cowboy_req:read_body(Req),
-  JobId = cowboy_req:binding(id, Req1),
 
   try
-    %% FIX: Modern JSX
-    #{<<"status">> := Status, <<"worker_id">> := WorkerId} = jsx:decode(Body, [return_maps]),
+    Map = jsx:decode(Body, [return_maps]),
 
-    distriqueue:update_job_status(JobId, Status, WorkerId),
+    %% Support both URL parameter (/:id/status) AND JSON body ({"jobId": ...})
+    JobId = case cowboy_req:binding(id, Req1) of
+              undefined -> maps:get(<<"jobId">>, Map, <<"unknown">>);
+              Id -> Id
+            end,
+
+    StatusBin = maps:get(<<"status">>, Map, <<"pending">>),
+    WorkerId = maps:get(<<"workerId">>, Map, <<"unknown">>),
+
+    %% Convert the JSON string status to an Erlang atom (running, completed, failed)
+    StatusAtom = erlang:binary_to_atom(StatusBin, utf8),
+
+    distriqueue:update_job_status(JobId, StatusAtom, WorkerId),
 
     cowboy_req:reply(200,
       #{<<"content-type">> => <<"application/json">>},
       jsx:encode(#{<<"status">> => <<"updated">>}), Req1)
+  catch
+    Error:Reason ->
+      lager:error("Status update failed: ~p:~p", [Error, Reason]),
+      cowboy_req:reply(400,
+        #{<<"content-type">> => <<"application/json">>},
+        jsx:encode(#{<<"error">> => <<"invalid_request">>}), Req1)
+  end.
+
+handle_worker_heartbeat(Req) ->
+  {ok, Body, Req1} = cowboy_req:read_body(Req),
+  try
+    Map = jsx:decode(Body, [return_maps]),
+    WorkerId = maps:get(<<"worker_id">>, Map, <<"unknown">>),
+    Capacity = maps:get(<<"capacity">>, Map, 10),
+    CurrentLoad = maps:get(<<"current_load">>, Map, 0),
+
+    %% Send the heartbeat stats to the Router to aid in load balancing
+    gen_server:cast(router, {worker_heartbeat, WorkerId, Capacity, CurrentLoad}),
+
+    cowboy_req:reply(200,
+      #{<<"content-type">> => <<"application/json">>},
+      jsx:encode(#{<<"status">> => <<"acknowledged">>}), Req1)
   catch
     _:_ ->
       cowboy_req:reply(400,

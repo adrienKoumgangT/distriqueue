@@ -45,11 +45,20 @@ init([]) ->
   {ok, #state{}}.
 
 handle_call({assign_worker, Job}, _From, State) ->
-  #job{type = Type, priority = Priority} = Job,
+  Type = case is_record(Job, job) of
+           true -> Job#job.type;
+           false when is_map(Job) -> maps:get(<<"type">>, Job, <<"unknown">>);
+           _ -> <<"unknown">>
+         end,
+
+  Priority = case is_record(Job, job) of
+               true -> Job#job.priority;
+               false when is_map(Job) -> maps:get(<<"priority">>, Job, 5);
+               _ -> 5
+             end,
 
   WorkerId = select_worker(Type, Priority, State),
 
-  %% FIX: Extract the map first, then update it
   CurrentLoadMap = State#state.worker_load,
   NewLoadMap = case maps:get(WorkerId, CurrentLoadMap, 0) of
                  Load -> CurrentLoadMap#{WorkerId => Load + 1}
@@ -63,13 +72,22 @@ handle_call(get_queue_stats, _From, State) ->
   {reply, {ok, State#state.queue_stats}, State}.
 
 handle_cast({route_job, Job}, State) ->
-  #job{id = JobId, priority = Priority} = Job,
+  JobId = case is_record(Job, job) of
+            true -> Job#job.id;
+            false when is_map(Job) -> maps:get(<<"id">>, Job, <<"unknown">>);
+            _ -> <<"unknown">>
+          end,
+
+  Priority = case is_record(Job, job) of
+               true -> Job#job.priority;
+               false when is_map(Job) -> maps:get(<<"priority">>, Job, 5);
+               _ -> 5
+             end,
 
   Queue = priority_to_queue(Priority),
 
   rabbitmq_client:publish_job(Queue, Job),
 
-  %% FIX: Extract the map first, then update it
   CurrentStatsMap = State#state.queue_stats,
   Stats = maps:get(Queue, CurrentStatsMap, {0, 0}),
   {Length, Rate} = Stats,
