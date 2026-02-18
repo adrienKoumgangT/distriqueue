@@ -536,21 +536,32 @@ handle_worker_heartbeat(Req, State) ->
 
 %% @doc Prometheus metrics endpoint
 handle_metrics(Req, State) ->
-  % Get job statistics
-  {ok, Jobs} = job_registry:get_all_jobs(),
+  %% 1. Get Job Stats Safely
+  {ok, Jobs} = case erlang:whereis(job_registry) of
+                 undefined -> {ok, []};
+                 _ -> job_registry:get_all_jobs()
+               end,
 
-  % Count jobs by status
-  JobCounts = lists:foldl(
-    fun(Job, Acc) ->
-      Status = element(3, Job),
-      Count = maps:get(Status, Acc, 0),
-      Acc#{Status => Count + 1}
-    end, #{}, Jobs),
+  JobCounts = lists:foldl(fun(Job, Acc) ->
+    Status = element(5, Job), %% Status is the 5th element in our job record
+    Acc#{Status => maps:get(Status, Acc, 0) + 1}
+                          end, #{}, Jobs),
 
-  % Get worker statistics
-  {ok, Workers} = dq_worker_pool:get_all_workers(),
+  %% 2. Get Worker Stats Safely
+  {ok, Workers} = case erlang:whereis(dq_worker_pool) of
+                    undefined -> {ok, []};
+                    _ -> dq_worker_pool:get_all_workers()
+                  end,
 
-  % Format Prometheus metrics
+  %% 3. Get Raft Status Safely
+  {RaftRole, RaftTerm} = case raft_fsm:get_state() of
+                           {follower, T, _Leader} -> {<<"follower">>, T};
+                           {candidate, T}         -> {<<"candidate">>, T};
+                           {leader, T}            -> {<<"leader">>, T};
+                           _                      -> {<<"unknown">>, 0}
+                         end,
+
+  %% 4. Format Prometheus metrics
   Metrics = [
     "# HELP distriqueue_jobs_total Total number of jobs",
     "# TYPE distriqueue_jobs_total counter",
@@ -558,37 +569,25 @@ handle_metrics(Req, State) ->
     "",
     "# HELP distriqueue_jobs_by_status Jobs by status",
     "# TYPE distriqueue_jobs_by_status gauge",
-    [io_lib:format("distriqueue_jobs_by_status{status=\"~s\"} ~p",
-      [Status, Count]) || {Status, Count} <- maps:to_list(JobCounts)],
-    "",
+    [io_lib:format("distriqueue_jobs_by_status{status=\"~s\"} ~p~n",
+      [atom_to_list(S), C]) || {S, C} <- maps:to_list(JobCounts)],
+
     "# HELP distriqueue_workers_total Total number of workers",
     "# TYPE distriqueue_workers_total gauge",
     io_lib:format("distriqueue_workers_total ~p", [length(Workers)]),
     "",
-    "# HELP distriqueue_raft_role Current Raft role",
-    "# TYPE distriqueue_raft_role gauge",
-    case raft_fsm:get_state() of
-      {follower, _, _} -> "distriqueue_raft_role{role=\"follower\"} 1";
-      {candidate, _} -> "distriqueue_raft_role{role=\"candidate\"} 1";
-      {leader, _} -> "distriqueue_raft_role{role=\"leader\"} 1"
-    end,
+    "# HELP distriqueue_raft_role Raft Role (1=Leader, 0=Follower/Candidate)",
+    io_lib:format("distriqueue_raft_role{role=\"~s\"} 1", [RaftRole]),
     "",
     "# HELP distriqueue_raft_term Current Raft term",
-    "# TYPE distriqueue_raft_term gauge",
-    io_lib:format("distriqueue_raft_term ~p",
-      [element(2, element(2, raft_fsm:get_state()))]),
+    io_lib:format("distriqueue_raft_term ~p", [RaftTerm]),
     "",
-    "# HELP erlang_vm_processes Number of Erlang processes",
-    "# TYPE erlang_vm_processes gauge",
-    io_lib:format("erlang_vm_processes ~p", [erlang:system_info(process_count)]),
-    "",
-    "# HELP erlang_vm_memory_bytes Memory usage in bytes",
-    "# TYPE erlang_vm_memory_bytes gauge",
+    "# HELP erlang_vm_memory_bytes Total memory usage",
     io_lib:format("erlang_vm_memory_bytes ~p", [erlang:memory(total)])
   ],
 
-  Body = string:join(lists:flatten(Metrics), "\n"),
-  Req2 = cowboy_req:reply(200, ?CONTENT_TEXT, Body, Req),
+  Response = lists:flatten(Metrics),
+  Req2 = cowboy_req:reply(200, #{<<"content-type">> => <<"text/plain">>}, Response, Req),
   {ok, Req2, State}.
 
 %%%===================================================================

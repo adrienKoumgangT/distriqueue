@@ -204,7 +204,7 @@ start_consumers(Channel) ->
 
 process_message(Tag, DeliveryTag, Body, Channel) ->
   try
-    Job = jsx:decode(Body),
+    Job = jsx:decode(Body, [return_maps]),
     JobId = maps:get(<<"id">>, Job, <<"unknown">>),
 
     lager:debug("Processing job ~p from queue ~p", [JobId, Tag]),

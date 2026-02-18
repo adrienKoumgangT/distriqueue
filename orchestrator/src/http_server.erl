@@ -89,38 +89,30 @@ handle_info(_Info, State) ->
   {noreply, State}.
 
 %%% COWBOY HANDLERS %%%
-%% FIX: cowboy_req:reply returns Req directly, not {ok, Req}
 init(Req, health) ->
-  Req1 = handle_health(Req),
-  {ok, Req1, health};
+  {ok, handle_health(Req), health};
 
 init(Req, cluster_status) ->
-  Req1 = handle_cluster_status(Req),
-  {ok, Req1, cluster_status};
+  {ok, handle_cluster_status(Req), cluster_status};
 
 init(Req, register_job) ->
-  Req1 = handle_register_job(Req),
-  {ok, Req1, register_job};
+  %% handle_register_job calls cowboy_req:reply, so we return the Req
+  {ok, handle_register_job(Req), register_job};
 
 init(Req, update_job_status) ->
-  Req1 = handle_update_job_status(Req),
-  {ok, Req1, update_job_status};
+  {ok, handle_update_job_status(Req), update_job_status};
 
 init(Req, cancel_job) ->
-  Req1 = handle_cancel_job(Req),
-  {ok, Req1, cancel_job};
+  {ok, handle_cancel_job(Req), cancel_job};
 
 init(Req, list_jobs) ->
-  Req1 = handle_list_jobs(Req),
-  {ok, Req1, list_jobs};
+  {ok, handle_list_jobs(Req), list_jobs};
 
 init(Req, raft_status) ->
-  Req1 = handle_raft_status(Req),
-  {ok, Req1, raft_status};
+  {ok, handle_raft_status(Req), raft_status};
 
 init(Req, metrics) ->
-  Req1 = handle_metrics(Req),
-  {ok, Req1, metrics}.
+  {ok, handle_metrics(Req), metrics}.
 
 handle_health(Req) ->
   Status = case job_registry:get_all_jobs() of
@@ -157,7 +149,7 @@ handle_register_job(Req) ->
 
   try
     %% FIX: Modern JSX returns maps automatically.
-    Job = jsx:decode(Body),
+    Job = jsx:decode(Body, [return_maps]),
 
     case distriqueue:register_job(Job) of
       ok ->
@@ -192,7 +184,7 @@ handle_update_job_status(Req) ->
 
   try
     %% FIX: Modern JSX
-    #{<<"status">> := Status, <<"worker_id">> := WorkerId} = jsx:decode(Body),
+    #{<<"status">> := Status, <<"worker_id">> := WorkerId} = jsx:decode(Body, [return_maps]),
 
     distriqueue:update_job_status(JobId, Status, WorkerId),
 

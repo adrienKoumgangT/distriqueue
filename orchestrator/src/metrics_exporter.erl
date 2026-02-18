@@ -85,19 +85,21 @@ handle_info(timeout, State) ->
 
   lager:info("Starting metrics exporter HTTP server on port ~p", [Port]),
 
-  case gen_tcp:listen(Port, [
-    binary,
+  Opts = [binary,
     {active, false},
     {reuseaddr, true},
     {backlog, 1024},
-    {ip, {0,0,0,0}}
-  ]) of
+    {ifaddr, {0,0,0,0}}],
+
+  case gen_tcp:listen(Port, Opts) of
     {ok, ListenSocket} ->
       start_acceptors(ListenSocket, 10),
       lager:info("Metrics exporter started successfully on port ~p", [Port]),
       {noreply, State#state{listener = ListenSocket}};
     {error, Reason} ->
       lager:error("Failed to start metrics exporter on port ~p: ~p", [Port, Reason]),
+      %% Don't crash the process, just try again in 5 seconds
+      erlang:send_after(5000, self(), timeout),
       {noreply, State}
   end;
 

@@ -2,7 +2,7 @@
 %%% @author adrien koumgang tegantchouang
 %%% @copyright (C) 2026, University of Pise
 %%% @doc
-%%%
+%%% Main Supervisor for the DistriQueue Orchestrator
 %%% @end
 %%%-------------------------------------------------------------------
 -module(distriqueue_sup).
@@ -16,27 +16,21 @@ start_link() ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-  SupFlags = #{strategy => one_for_one,
+  SupFlags = #{
+    strategy => one_for_one,
     intensity => 5,
-    period => 10},
+    period => 10
+  },
 
   Children = [
+    %% 1. Metrics and Health (Infrastructure first)
     #{
-      id => raft_fsm,
-      start => {raft_fsm, start_link, []},
+      id => metrics_exporter,
+      start => {metrics_exporter, start_link, []},
       restart => permanent,
       shutdown => 5000,
       type => worker
     },
-
-    #{
-      id => job_registry,
-      start => {job_registry, start_link, []},
-      restart => permanent,
-      shutdown => 5000,
-      type => worker
-    },
-
     #{
       id => health_monitor,
       start => {health_monitor, start_link, []},
@@ -45,14 +39,23 @@ init([]) ->
       type => worker
     },
 
+    %% 2. Consensus and Data
     #{
-      id => router,
-      start => {router, start_link, []},
+      id => raft_fsm,
+      start => {raft_fsm, start_link, []},
+      restart => permanent,
+      shutdown => 5000,
+      type => worker
+    },
+    #{
+      id => job_registry,
+      start => {job_registry, start_link, []},
       restart => permanent,
       shutdown => 5000,
       type => worker
     },
 
+    %% 3. Resource Management
     #{
       id => dq_worker_pool,
       start => {dq_worker_pool, start_link, []},
@@ -61,6 +64,7 @@ init([]) ->
       type => worker
     },
 
+    %% 4. External Communication (RabbitMQ)
     #{
       id => rabbitmq_client,
       start => {rabbitmq_client, start_link, []},
@@ -69,9 +73,19 @@ init([]) ->
       type => worker
     },
 
+    %% 5. Routing Logic
     #{
-      id => metrics_exporter,
-      start => {metrics_exporter, start_link, []},
+      id => router,
+      start => {router, start_link, []},
+      restart => permanent,
+      shutdown => 5000,
+      type => worker
+    },
+
+    %% 6. API Layer (Start last so background services are ready)
+    #{
+      id => http_server,
+      start => {http_server, start_link, []},
       restart => permanent,
       shutdown => 5000,
       type => worker
