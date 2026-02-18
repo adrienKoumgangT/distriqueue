@@ -18,7 +18,7 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
--record(job, {id, type, priority, payload, status}).
+-include("distriqueue.hrl").
 
 -record(state, {
   worker_load = #{} :: map(),           % WorkerId -> Load

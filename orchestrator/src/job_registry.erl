@@ -17,7 +17,9 @@
   get_job/1,
   get_all_jobs/0,
   find_jobs_by_status/1,
-  find_jobs_by_worker/1]).
+  find_jobs_by_worker/1,
+  job_to_map/1,
+  job_to_json/1]).
 
 %% Java RPC handlers
 -export([register_job_rpc/1,
@@ -28,23 +30,7 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
--record(job, {
-  id,
-  type,
-  priority,
-  status = pending,
-  worker_id = none,
-  payload,
-  result,
-  error_message,
-  retry_count = 0,
-  max_retries = 3,
-  execution_timeout = 300,
-  created_at,
-  started_at,
-  completed_at,
-  metadata = #{}
-}).
+-include("distriqueue.hrl").
 
 -record(state, {
   jobs = #{} :: map(),
@@ -310,3 +296,30 @@ broadcast_job_update(Job) ->
     fun(Node) ->
       gen_server:cast({?MODULE, Node}, {sync_job, Job})
     end, Nodes).
+
+
+job_to_map(#job{} = Job) ->
+  #{
+    <<"id">> => Job#job.id,
+    <<"type">> => Job#job.type,
+    <<"priority">> => Job#job.priority,
+    <<"status">> => Job#job.status,
+    <<"worker_id">> => Job#job.worker_id,
+    <<"payload">> => Job#job.payload,
+    <<"result">> => Job#job.result,
+    <<"error_message">> => Job#job.error_message,
+    <<"retry_count">> => Job#job.retry_count,
+    <<"max_retries">> => Job#job.max_retries,
+    <<"execution_timeout">> => Job#job.execution_timeout,
+    <<"created_at">> => Job#job.created_at,
+    <<"started_at">> => Job#job.started_at,
+    <<"completed_at">> => Job#job.completed_at,
+    <<"metadata">> => Job#job.metadata
+  };
+job_to_map(Job) when is_map(Job) ->
+  Job.
+
+job_to_json(Job) ->
+  Map = job_to_map(Job),
+  jsx:encode(Map).
+

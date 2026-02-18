@@ -23,12 +23,18 @@
   id,
   type,
   priority,
+  status,
   worker_id,
+  payload,
+  result,
+  error,
+  retries,
+  max_retries,
+  timeout,
   created_at,
   started_at,
   completed_at,
-  status,
-  payload
+  metadata
 }).
 
 -record(state, {

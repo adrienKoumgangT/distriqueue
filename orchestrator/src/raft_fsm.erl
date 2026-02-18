@@ -190,13 +190,15 @@ follower(cast, {append_entries_rpc, LeaderId, Term, PrevLogIndex,
       % Apply committed entries
       apply_committed_entries(NewState),
 
-      {keep_state, NewState,
-        [{reply, {LeaderId, node()},
-          {append_entries_reply, NewTerm, true, length(NewLog)}}]};
+      Reply = {append_entries_reply, node(), NewTerm, true, length(NewLog)},
+      gen_statem:cast({?MODULE, LeaderId}, Reply),
+      %% THE FIX: Timer Reset added here
+      {keep_state, NewState, [{state_timeout, random_election_timeout(), election_timeout}]};
     true ->
-      {keep_state, State,
-        [{reply, {LeaderId, node()},
-          {append_entries_reply, State#state.current_term, false, length(State#state.log)}}]}
+      Reply = {append_entries_reply, node(), State#state.current_term, false, length(State#state.log)},
+      gen_statem:cast({?MODULE, LeaderId}, Reply),
+      %% THE FIX: Timer Reset added here
+      {keep_state, State, [{state_timeout, random_election_timeout(), election_timeout}]}
   end;
 
 %% Handle info messages

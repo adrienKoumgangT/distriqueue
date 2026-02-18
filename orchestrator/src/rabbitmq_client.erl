@@ -20,6 +20,8 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
+-include("distriqueue.hrl").
+
 -record(state, {
   connection,
   channel,
@@ -57,11 +59,14 @@ init([]) ->
 
 handle_call({publish_job, Queue, Job}, _From, State) ->
   try
-    JobJson = job_to_json(Job),
+    %% FIXED: Convert Job record to Map before encoding
+    %JobMap = job_registry:job_to_map(Job),
+    %JobJson = job_registry:job_to_json(JobMap),
+    JobJson = job_registry:job_to_json(Job),
 
-    %% Ensure we can extract priority whether Job is a map or a proplist
-    Priority = case is_map(Job) of
-                 true -> maps:get(priority, Job, maps:get(<<"priority">>, Job, 5));
+    %% Ensure we can extract priority
+    Priority = case is_record(Job, job) of
+                 true -> Job#job.priority;
                  false -> 5
                end,
 
@@ -78,9 +83,8 @@ handle_call({publish_job, Queue, Job}, _From, State) ->
     ok = amqp_channel:cast(State#state.channel, BasicPublish,
       #amqp_msg{props = Props, payload = JobJson}),
 
-    %% Try to extract ID for logging safely
-    JobId = case is_map(Job) of
-              true -> maps:get(id, Job, maps:get(<<"id">>, Job, <<"unknown">>));
+    JobId = case is_map(JobMap) of
+              true -> maps:get(<<"id">>, JobMap, <<"unknown">>);
               false -> <<"unknown">>
             end,
 
@@ -227,9 +231,6 @@ process_message(Tag, DeliveryTag, Body, Channel) ->
       amqp_channel:cast(Channel,
         #'basic.reject'{delivery_tag = DeliveryTag, requeue = false})
   end.
-
-job_to_json(Job) ->
-  jsx:encode(Job).
 
 priority_to_amqp(Priority) when is_integer(Priority), Priority >= 10 -> 10;
 priority_to_amqp(Priority) when is_integer(Priority), Priority >= 5 -> 5;
