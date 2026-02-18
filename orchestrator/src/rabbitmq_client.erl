@@ -67,7 +67,8 @@ handle_call({publish_job, Queue, Job}, _From, State) ->
     %% Ensure we can extract priority
     Priority = case is_record(Job, job) of
                  true -> Job#job.priority;
-                 false -> 5
+                 false when is_map(Job) -> maps:get(<<"priority">>, Job, 5);
+                 _ -> 5
                end,
 
     Props = #'P_basic'{
@@ -83,9 +84,10 @@ handle_call({publish_job, Queue, Job}, _From, State) ->
     ok = amqp_channel:cast(State#state.channel, BasicPublish,
       #amqp_msg{props = Props, payload = JobJson}),
 
-    JobId = case is_map(JobMap) of
-              true -> maps:get(<<"id">>, JobMap, <<"unknown">>);
-              false -> <<"unknown">>
+    JobId = case is_record(Job, job) of
+              true -> Job#job.id;
+              false when is_map(Job) -> maps:get(<<"id">>, Job, <<"unknown">>);
+              _ -> <<"unknown">>
             end,
 
     lager:debug("Published job ~p to queue ~p", [JobId, Queue]),
