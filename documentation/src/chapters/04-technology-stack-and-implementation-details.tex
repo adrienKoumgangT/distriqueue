@@ -1,4 +1,4 @@
-\chapter{Technology Stack And Implemenimages/jobs-managementechnology-stack-and-implementation-details}
+\chapter{Technology Stack And Implementation Details}\label{ch:technology-stack-and-implementation-details}
 
 
 \section{Project Structure}\label{sec:project-structure}
@@ -24,6 +24,27 @@ To prevent inclusion explosions and maintain a single source of truth across the
   capacity :: integer(),
   current_load :: integer(),
   last_heartbeat :: integer()
+}).
+\end{lstlisting}
+
+
+\begin{lstlisting}[language=Erlang, caption={Shared Job Record},label={lst:shared-job-record}]
+-record(job, {
+  id,
+  type,
+  priority,
+  status = pending,
+  worker_id = none,
+  payload,
+  result,
+  error_message,
+  retry_count = 0,
+  max_retries = 3,
+  execution_timeout = 300,
+  created_at,
+  started_at,
+  completed_at,
+  metadata = #{}
 }).
 \end{lstlisting}
 
@@ -113,7 +134,7 @@ CREATE INDEX idx_job_worker ON jobs(worker_id);
 
 \begin{tabular}{l l l}
     Service & Adrien0 (10.2.1.11) & Adrien1 (10.2.1.12) \\
-    API Gateway & http://10.2.1.11 & http://10.2.1.12 \\
+    API Gateway & http://10.2.1.11 & - \\
     Load Balancer & http://10.2.1.11 (port 80) & - \\
     H2 Console & http://10.1.2.11:8082/h2-console & http://10.1.2.12:8082/h2-console \\
     RabbitMQ UI & http://10.1.2.11:15672 & http://10.1.2.12:15672 \\

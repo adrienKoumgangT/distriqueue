@@ -27,7 +27,7 @@ To fulfill the course requirements regarding models, paradigms, and middleware, 
 \textbf{Failure Recovery Flow:}
 \begin{enumerate}
     \item Leader orchestrator node fails.
-    [cite_start]\item Remaining nodes detect failure via heartbeat timeout[cite: 71, 72].
+    \item Remaining nodes detect failure via heartbeat timeout.
     \item Raft consensus elects a new leader.
     \item New leader resumes job processing and re-registers connected workers.
 \end{enumerate}
@@ -35,8 +35,8 @@ To fulfill the course requirements regarding models, paradigms, and middleware, 
 \section{Component Responsibilities}\label{sec:component-responsabilities}
 
 \begin{itemize}
-    \item \textbf{Orchestrator (Erlang/OTP)}: Leader election, job registry, dynamic worker routing, load balancing, health monitoring[cite: 73].
+    \item \textbf{Orchestrator (Erlang/OTP)}: Leader election, job registry, dynamic worker routing, load balancing, health monitoring.
     \item \textbf{API Gateway (Java/Spring)}: REST API, SSE streaming, Jackson JSON serialization.
     \item \textbf{Message Broker (RabbitMQ)}: Priority queuing, AMQP routing.
-    \item \textbf{Workers (Python, Java)}: Job execution (calculation, transformation, validation)[cite: 73].
+    \item \textbf{Workers (Python, Java)}: Job execution (calculation, transformation, validation).
 \end{itemize}
