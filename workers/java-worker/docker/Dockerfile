@@ -5,8 +5,8 @@ WORKDIR /app
 # Create non-root user
 RUN addgroup -S distriqueue && adduser -S distriqueue -G distriqueue
 
-# Copy JAR file
-COPY target/java-worker-1.0.0.jar app.jar
+# Copy JAR file produced by `./mvnw clean package`
+COPY target/java-worker-0.0.1-SNAPSHOT.jar app.jar
 
 # Set permissions
 RUN chown -R distriqueue:distriqueue /app

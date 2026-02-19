@@ -1,14 +1,20 @@
 %%%-------------------------------------------------------------------
-%%% @author adrien koumgang tegantchouang
-%%% @copyright (C) 2026, University Of Pise
-%%% @doc
-%%%
-%%% @end
-%%%-------------------------------------------------------------------
--author("adrien koumgang tegantchouang").
-
-
 %%% Shared Record Definitions for DistriQueue
+%%%-------------------------------------------------------------------
+
+-record(worker, {
+  id :: binary(),
+  type :: binary(),
+  status :: active | idle | unresponsive | overloaded | draining,
+  capacity :: integer(),
+  current_load :: integer(),
+  last_heartbeat :: integer(),
+  registered_at :: integer(),
+  total_jobs_processed :: integer(),
+  failed_jobs :: integer(),
+  avg_processing_time :: float(),
+  metadata :: map()
+}).
 
 -record(job, {
   id,

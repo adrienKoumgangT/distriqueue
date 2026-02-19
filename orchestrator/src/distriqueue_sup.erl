@@ -23,7 +23,7 @@ init([]) ->
   },
 
   Children = [
-    %% 1. Metrics and Health (Infrastructure first)
+    %% Metrics and Health (Infrastructure first)
     #{
       id => metrics_exporter,
       start => {metrics_exporter, start_link, []},
@@ -39,7 +39,7 @@ init([]) ->
       type => worker
     },
 
-    %% 2. Consensus and Data
+    %% Consensus and Data
     #{
       id => raft_fsm,
       start => {raft_fsm, start_link, []},
@@ -55,7 +55,7 @@ init([]) ->
       type => worker
     },
 
-    %% 3. Resource Management
+    %% Resource Management
     #{
       id => dq_worker_pool,
       start => {dq_worker_pool, start_link, []},
@@ -64,7 +64,7 @@ init([]) ->
       type => worker
     },
 
-    %% 4. External Communication (RabbitMQ)
+    %% External Communication (RabbitMQ)
     #{
       id => rabbitmq_client,
       start => {rabbitmq_client, start_link, []},
@@ -73,7 +73,7 @@ init([]) ->
       type => worker
     },
 
-    %% 5. Routing Logic
+    %% Routing Logic
     #{
       id => router,
       start => {router, start_link, []},
@@ -82,7 +82,7 @@ init([]) ->
       type => worker
     },
 
-    %% 6. API Layer (Start last so background services are ready)
+    %% API Layer (Start last so background services are ready)
     #{
       id => http_server,
       start => {http_server, start_link, []},

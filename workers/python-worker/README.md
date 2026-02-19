@@ -38,15 +38,15 @@ The worker reads configuration from environment variables (defaults exist, but y
 
 | Variable | Description | Example |
 |---|---|---|
-| `RABBITMQ_HOST` | RabbitMQ hostname | `localhost` |
+| `RABBITMQ_HOST` | RabbitMQ hostname | `10.2.1.11` |
 | `RABBITMQ_PORT` | RabbitMQ port | `5672` |
 | `RABBITMQ_USERNAME` | RabbitMQ username | `<RABBITMQ_USERNAME>` |
 | `RABBITMQ_PASSWORD` | RabbitMQ password | `<RABBITMQ_PASSWORD>` |
 | `WORKER_ID` | Optional fixed worker id (otherwise auto-generated) | `python-worker-01` |
 | `WORKER_TYPE` | Worker type label | `python` |
 | `WORKER_CAPACITY` | Max concurrency value used by the worker | `10` |
-| `ORCHESTRATOR_URL` | Base URL for orchestrator heartbeats | `http://localhost:8081` |
-| `STATUS_UPDATE_URL` | URL for posting job status updates | `http://localhost:8080/api/v1/jobs/status` |
+| `ORCHESTRATOR_URL` | Base URL for orchestrator heartbeats | `http://10.2.1.11:8081` |
+| `STATUS_UPDATE_URL` | URL for posting job status updates | `http://10.2.1.11:8080/api/jobs/status` |
 
 ## Run locally (Python)
 
@@ -65,7 +65,15 @@ export WORKER_CAPACITY=10
 
 python worker.py
 ```
-## Run with Docker
+
+This worker is deployed on **two virtual machines**:
+
+- **VM1**: `10.2.1.11`
+- **VM2**: `10.2.1.12`
+
+Make sure both instances are configured consistently (same RabbitMQ and API endpoints, different optional `WORKER_ID` values if you want fixed identities).
+
+Example environment for each VM:
 
 ### Build
 

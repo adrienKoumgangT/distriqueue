@@ -1,116 +1,87 @@
-# Gateway
+# DistriQueue API Gateway
 
-Spring Boot gateway for DistriQueue. 
-It exposes REST endpoints for job submission and management, persists job state to H2, publishes jobs to RabbitMQ,
-integrates with Erlang orchestrators, and streams job updates via Server-Sent Events (SSE).
+Java/Spring Boot API gateway for DistriQueue. It accepts job requests, persists state in H2, routes jobs to RabbitMQ by priority, communicates with Erlang orchestrators, and streams updates over SSE.
 
-## Features
-- Job submission (single and batch) with validation and metadata.
-- Job lifecycle management: query, cancel, retry, and statistics.
-- RabbitMQ routing by priority.
-- H2 persistence with scheduled cleanup for old completed jobs.
-- SSE stream for real-time job status updates.
-- OpenAPI/Swagger UI and Prometheus metrics.
+## Deployment Target
+- VM host IP: `10.2.1.11`
+- Default gateway URL (standard profile): `http://10.2.1.11:8082/api`
+- Default gateway URL (`vm` profile): `http://10.2.1.11:8080/api`
 
-## Tech Stack
-- Java 21, Spring Boot 4
+## Stack
+- Java `25`
+- Spring Boot `4.0.2`
 - Spring Web, WebFlux, Validation, Data JPA
-- RabbitMQ (AMQP), Redis
-- H2 database
-- Springdoc OpenAPI
-- Micrometer Prometheus
+- RabbitMQ, Redis
+- H2 (file DB)
+- Springdoc OpenAPI (Swagger UI)
+- Micrometer + Prometheus
 
-## Requirements
-- Java 21
-- RabbitMQ instance
-- Redis instance
-- Erlang orchestrator nodes
+## Runtime Configuration
+Main config files:
+- `src/main/resources/application.yaml` (default/local + VM-friendly defaults)
+- `src/main/resources/application-vm.properties` (VM profile overrides)
+- `src/main/resources/application-docker.yml` (container profile)
 
-## Configuration
-Configuration lives in `src/main/resources/application.yaml` and can be overridden via environment variables.
-
-Key environment variables:
-- `SERVER_PORT` (default: 8080)
-- `RABBITMQ_HOST` (default: rabbitmq1)
-- `RABBITMQ_PORT` (default: 5672)
-- `RABBITMQ_USERNAME` (default: admin)
-- `RABBITMQ_PASSWORD` (default: admin)
-- `REDIS_HOST` (default: localhost)
-- `REDIS_PORT` (default: 6379)
-- `ERLANG_NODES` (default: orchestrator1@distriqueue,orchestrator2@distriqueue)
-- `ERLANG_REST_PORT` (default: 8081)
-- `ERLANG_COOKIE` (default: distriqueue-cookie)
-- `JOB_DEFAULT_TIMEOUT` (default: 300)
-- `JOB_DEFAULT_RETRIES` (default: 3)
-- `JOB_MAX_BATCH_SIZE` (default: 1000)
-- `JOB_RETENTION_DAYS` (default: 30)
-- `JOB_CLEANUP_ENABLED` (default: true)
-- `WORKER_HEALTH_CHECK_INTERVAL` (default: 30000)
-- `WORKER_HEALTH_TIMEOUT` (default: 120000)
-
-RabbitMQ queue/exchange overrides:
-- `RABBITMQ_EXCHANGE_JOBS` (default: jobs.exchange)
-- `RABBITMQ_EXCHANGE_STATUS` (default: status.exchange)
-- `RABBITMQ_QUEUE_JOB_HIGH` (default: job.high)
-- `RABBITMQ_QUEUE_JOB_MEDIUM` (default: job.medium)
-- `RABBITMQ_QUEUE_JOB_LOW` (default: job.low)
-- `RABBITMQ_QUEUE_STATUS` (default: status.queue)
-- `RABBITMQ_QUEUE_DEAD_LETTER` (default: job.dead-letter)
-
-## Running Locally
-1) Start RabbitMQ and Redis.
-2) Run the app:
-
-```bash
-./mvnw spring-boot:run
-```
-
-The API is served under `/api`.
+Important defaults from `application.yaml`:
+- `SERVER_PORT=8082`
+- `server.servlet.context-path=/api`
+- `RABBITMQ_ADDRESSES=10.2.1.11:5672,10.2.1.12:5672`
+- `REDIS_HOST=10.2.1.11`
+- `ERLANG_NODES=orchestrator@10.2.1.11,orchestrator@10.2.1.12`
+- `ERLANG_REST_PORT=8081`
 
 ## API Endpoints
 Base path: `/api`
 
-- `POST /jobs` Submit a job
-- `GET /jobs/{id}` Get job by ID
-- `GET /jobs` Filter and paginate jobs
-- `POST /jobs/batch` Submit a batch of jobs
-- `POST /jobs/{id}/cancel` Cancel an active job
-- `POST /jobs/{id}/retry` Retry a failed job
-- `GET /jobs/statistics` Job statistics
-- `GET /jobs/stream` SSE stream for job updates
+- `POST /jobs`
+- `GET /jobs/{id}`
+- `GET /jobs`
+- `POST /jobs/batch`
+- `POST /jobs/{id}/cancel`
+- `POST /jobs/{id}/retry`
+- `GET /jobs/statistics`
+- `GET /jobs/stream` (SSE)
 
-### Example: Submit Job
+## Run
+Prerequisites:
+- Java 25
+- RabbitMQ reachable from gateway VM
+- Redis reachable from gateway VM
+- Erlang orchestrator nodes reachable from gateway VM
+
+Start locally/default profile:
 ```bash
-curl -X POST http://localhost:8080/api/jobs \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "type": "calculate",
-    "jobPriority": "HIGH",
-    "payload": {"numbers": [1, 2, 3, 4, 5]},
-    "maxRetries": 3,
-    "executionTimeout": 300
-  }'
+./mvnw spring-boot:run
 ```
 
-### Example: Stream Updates
+Start with VM profile:
 ```bash
-curl http://localhost:8080/api/jobs/stream
+./mvnw spring-boot:run -Dspring-boot.run.profiles=vm
 ```
 
-## OpenAPI / Swagger
-- `GET /api/swagger-ui.html`
-- `GET /api/api-docs`
+## Package for VM
+Build executable jar with VM deployment profile:
+```bash
+./mvnw clean package -Pvm-deploy
+```
 
-## Observability
-- `GET /api/actuator/health`
-- `GET /api/actuator/metrics`
-- `GET /api/actuator/prometheus`
+Run jar on VM:
+```bash
+java -jar target/gateway-0.0.1-SNAPSHOT.jar --spring.profiles.active=vm
+```
 
-## Data and Logs
-- H2 file DB: `./data/distriqueue`
-- Logs: `./logs/gateway.log`
+## API Docs and Observability
+- Swagger UI: `/api/swagger-ui.html`
+- OpenAPI JSON: `/api/v3/api-docs`
+- Health: `/api/actuator/health`
+- Metrics: `/api/actuator/metrics`
+- Prometheus: `/api/actuator/prometheus`
 
-## Tests
+## Storage and Logs
+- H2 DB file: `./data/distriqueue`
+- App log file: `./logs/gateway.log`
+
+## Test
 ```bash
 ./mvnw test
 ```

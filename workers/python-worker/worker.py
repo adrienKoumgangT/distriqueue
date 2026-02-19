@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-DistriQueue Python Worker
-Complete implementation for distributed job processing system
-"""
 
 import pika
 import json

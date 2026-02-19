@@ -103,7 +103,7 @@ handle_root(Req, State) ->
     "</style>",
     "</head>",
     "<body>",
-    "<h1>🚀 DistriQueue API</h1>",
+    "<h1>DistriQueue API</h1>",
     "<p>Distributed Job Scheduler - Erlang Orchestrator</p>",
 
     "<h2>System Status</h2>",
@@ -536,7 +536,7 @@ handle_worker_heartbeat(Req, State) ->
 
 %% @doc Prometheus metrics endpoint
 handle_metrics(Req, State) ->
-  %% 1. Get Job Stats Safely
+  %% Get Job Stats Safely
   {ok, Jobs} = case erlang:whereis(job_registry) of
                  undefined -> {ok, []};
                  _ -> job_registry:get_all_jobs()
@@ -547,13 +547,13 @@ handle_metrics(Req, State) ->
     Acc#{Status => maps:get(Status, Acc, 0) + 1}
                           end, #{}, Jobs),
 
-  %% 2. Get Worker Stats Safely
+  %% Get Worker Stats Safely
   {ok, Workers} = case erlang:whereis(dq_worker_pool) of
                     undefined -> {ok, []};
                     _ -> dq_worker_pool:get_all_workers()
                   end,
 
-  %% 3. Get Raft Status Safely
+  %% Get Raft Status Safely
   {RaftRole, RaftTerm} = case raft_fsm:get_state() of
                            {follower, T, _Leader} -> {<<"follower">>, T};
                            {candidate, T}         -> {<<"candidate">>, T};
@@ -561,7 +561,7 @@ handle_metrics(Req, State) ->
                            _                      -> {<<"unknown">>, 0}
                          end,
 
-  %% 4. Format Prometheus metrics
+  %% Format Prometheus metrics
   Metrics = [
     "# HELP distriqueue_jobs_total Total number of jobs",
     "# TYPE distriqueue_jobs_total counter",

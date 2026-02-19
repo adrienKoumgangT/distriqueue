@@ -1,319 +1,56 @@
 \chapter{Distributed Systems Challenges and Solutions}\label{ch:distributed-systems-challenges-and-solutions}
 
 
-\section{Synchronization/Coordination Challenges}\label{sec:syncrhonization/coordination-challenges}
+\section{Synchronization and Coordination Challenges}\label{sec:syncrhonization-and-coordination-challenges}
+
 
 \subsection{Challenge 1: Leader Election}\label{subsec:challenge-1:-leader-election}
 
-\textbf{Problem}: In a distributed system, multiple orchestrator nodes cannot all act as leaders simultaneously.
-A single leader must be elected to coordinate job assignments and maintain consistency.
+\textbf{Problem}: Multiple orchestrator nodes cannot all act as leaders simultaneously without causing duplicate job assignments.
 
-\textbf{Solution}: \textbf{Raft Consensus Algorithm Implementation}
+\textbf{Solution}: \textbf{Raft Consensus Algorithm}.
+Implemented in \texttt{raft\_fsm.erl}, using \texttt{gen\_statem}.
+The system uses randomized election timeouts to prevent split votes and maintains a strict logical clock (term) to detect stale leaders.
 
-\begin{lstlisting}[language=Erlang, caption={Raft Consensus Algorithm Implementation}, label={lst:raft-consesus-algorithm-implementation}]
-% Simplified Raft state machine (raft_fsm.erl)
--define(ELECTION_TIMEOUT, {150, 150}). % 150-300ms
--define(HEARTBEAT_INTERVAL, 150).      % 150ms
-
-% State: follower, candidate, leader
-% Key operations:
-% - request_vote/3 : Request votes from peers
-% - append_entries/6: Replicate log entries
-% - commit/1       : Commit entries to state machine
-
-% Leader election sequence:
-% 1. Follower detects election timeout
-% 2. Follower → Candidate, increments term
-% 3. Candidate requests votes from peers
-% 4. Candidate receives majority → Leader
-% 5. Leader sends heartbeats to maintain authority
-\end{lstlisting}
-
-\textbf{Complexities Addressed}:
-\begin{itemize}
-    \item \textbf{Term management}: Logical clock to detect stale leaders
-    \item \textbf{Vote splitting}: Randomized election timeouts
-    \item \textbf{Log matching}: Ensure followers have consistent logs
-    \item \textbf{Safety}: At most one leader per term
-\end{itemize}
 
 \subsection{Challenge 2: Distributed State Consistency}\label{subsec:challenge-2:-distributed-state-consistency}
 
-\textbf{Problem}: Multiple orchestrator nodes need a consistent view of job states.
-Simple master-slave replication can lead to inconsistencies during network partitions.
+\textbf{Problem}: Multiple orchestrator nodes need a consistent view of job states despite network partitions.
 
-\textbf{Solution}: CRDT-based Job Registry
-
-\begin{lstlisting}[language=Erlang, caption={CRDT-based Job Registry}, label={lst:crdt-based-job-registry}]
-% CRDT implementation using Observed-Remove Set (job_registry.erl)
-merge_crdt(State1, State2) ->
-    orddict:merge(fun(_Key, {T1, V1}, {T2, V2}) ->
-        case T1 > T2 of
-            true -> {T1, V1};
-            false -> {T2, V2}
-        end
-    end, State1, State2).
-
-% Each update includes timestamp for conflict resolution
-update_job(JobId, Status) ->
-    Timestamp = erlang:system_time(microsecond),
-    CRDT = orddict:store(JobId, {Timestamp, Status}, State),
-    broadcast_crdt_update(CRDT).
-\end{lstlisting}
-
-\textbf{Properties Guaranteed}:
-\begin{itemize}
-    \item \textbf{Eventual consistency}: All nodes converge to same state
-    \item \textbf{Conflict-free}: Concurrent updates merge deterministically
-    \item \textbf{No central coordinator}: Each node operates independently
-    \item \textbf{Fault-tolerant}: Network partitions resolve automatically
-\end{itemize}
+\textbf{Solution}: \textbf{CRDT-based Job Registry}.
+Implemented in \texttt{job\_registry.erl}, using an Observed-Remove Set (OR-Set) with microsecond timestamps for deterministic conflict resolution.
 
 
-\subsection{Challenge 3: Exactly-Once Execution}\label{subsec:challenge-3:-exactly-once-execution}
+\subsection{Challenge 3: Dynamic Worker Coordination}\label{subsec:challenge-3:-dynamic-worker-coordination}
 
-\textbf{Problem}: Ensuring each job executes exactly once, even in the presence of worker failures, network issues, or system restarts.
+\textbf{Problem}: Dynamically assigning jobs to heterogeneous workers (Python/Java) based on real-time load and specific job types (e.g., `calculate` vs `transform`).
 
-\textbf{Solution}: \textbf{Multi-layered Approach}
-
-\begin{lstlisting}[language=Erlang, caption={Multi-layered Approach}, label={lst:multi-layred-approach}]
-% 1. Idempotent job design
-process_job(Job) ->
-    case job_already_processed(Job#job.id) of
-        true -> {ok, already_processed};
-        false -> execute_job(Job)
-    end.
-
-% 2. Delivery tracking with RabbitMQ
-% - Messages not acknowledged until job completes
-% - Automatic requeue on worker failure
-% - Dead letter queue for failed jobs
-
-% 3. Distributed locking
-acquire_job_lock(JobId) ->
-    case global:set_lock({job_lock, JobId}, [node()], 5000) of
-        true -> {ok, acquired};
-        false -> {error, locked}
-    end.
-\end{lstlisting}
-
-
-\subsection{Challenge 4: Worker Coordination}\label{subsec:challenge-4:-worker-coordination}
-
-\textbf{Problem}: Dynamically assigning jobs to available workers while respecting capacity limits and job priorities.
-
-\textbf{Solution}: \textbf{Worker Pool with Load Balancing}
-
-\begin{lstlisting}[language=Erlang, caption={Worker Pool with Load Balancin}, label={lst:worker-pool-with-load-balancing}]
-% Least-loaded worker selection (worker_pool.erl)
-select_least_loaded(Workers) ->
-    lists:foldl(
-        fun(Worker, Acc) ->
-            LoadRatio = Worker#worker.current_load / Worker#worker.capacity,
-            AccRatio = Acc#worker.current_load / Acc#worker.capacity,
-            if LoadRatio < AccRatio -> Worker; true -> Acc end
-        end,
-        hd(Workers), tl(Workers)
-    ).
-
-% Priority-based queue routing (router.erl)
-priority_to_queue(Priority) when Priority >= 10 -> <<"job.high">>;
-priority_to_queue(Priority) when Priority >= 5 -> <<"job.medium">>;
-priority_to_queue(_) -> <<"job.low">>.
-\end{lstlisting}
+\textbf{Solution}: \textbf{Dynamic Polyglot Load Balancer}.
+Implemented in \texttt{router.erl}.
+Instead of hardcoding worker assignments, the system queries the \texttt{dq\_worker\_pool} to find all workers capable of a specific task type,
+calculates their \texttt{current\_load / capacity} ratio, and routes the job to the least loaded node.
 
 
 \section{Communication Challenges}\label{sec:communication-challenges}
 
-\subsection{Challenge 5: Reliable Message Delivery}\label{subsec:challenge-5:-reliable-message-delivery}
 
-\textbf{Problem}: messages can be lost, duplicated, or reordered in distributed systems.
+\subsection{Challenge 4: Heterogeneous System Integration}\label{subsec:challenge-4:-heterogeneous-system-integration}
 
-\textbf{Solution}: \textbf{RabbitMQ with Confirms and Persistence}
+\textbf{Problem}: Components written in Erlang, Java, and Python must communicate seamlessly without tight coupling.
 
-\begin{lstlisting}[language=Erlang, caption={RabbitMQ with Confirms and Persistence}, label={lst:rabbitmq-with-confirms-and-persistence}]
-% Publisher confirms (RabbitMQ Java client)
-rabbitTemplate.setConfirmCallback((correlationData, ack, cause) -> {
-    if (ack) {
-        log.debug("Message confirmed: {}", correlationData);
-    } else {
-        log.error("Message rejected: {}", cause);
-        // Retry or store for later delivery
-    }
-});
-
-% Durable queues and persistent messages
-channel.queue_declare(queue, true, false, false,
-    [{"x-max-priority", 10}, {"x-queue-type", "quorum"}]);
-
-% Consumer acknowledgments
-ch.basic_ack(delivery_tag);  // Success - remove from queue
-ch.basic_nack(delivery_tag, false, true);  // Failure - requeue
-\end{lstlisting}
-
-\textbf{Delivery Guarantees}:
+\textbf{Solution}: \textbf{Polyglot Message-Oriented Strategy}.
 \begin{itemize}
-    \item \textbf{At-least-once}: Messages survive broker restarts
-    \item \textbf{Exactly-once}: Idempotent consumers + message deduplication
-    \item \textbf{Ordered processing}: Per-queue FIFO semantics
-    \item \textbf{Dead lettering}: Failed messages routed to DLQ
+    \item \textbf{AMQP (RabbitMQ)}: Used for asynchronous job distribution (Gateway $\rightarrow$ Erlang) and status broadcasting (Erlang $\rightarrow$ Gateway).
+    \item \textbf{HTTP/REST}: Used by Workers to report completion metrics back to the Erlang API (\texttt{distriqueue\_api.erl}).
+    \item \textbf{Erlang Distribution}: Used natively for Inter-node Gossip and Raft coordination.
 \end{itemize}
 
 
-\subsection{Challenge 6: Heterogeneoous System Integration}\label{subsec:challenge-6:-heterogeneoous-system-integration}
+\subsection{Challenge 5: The "Black Hole" Status Problem}\label{subsec:challenge-5:-the-"black-hole"-status-problem}
 
-\textbf{Problem}: Different components written in different languages (Erlang, Java, Python) need to communicate seamlessly.
+\textbf{Problem}: Initially, workers pushed statuses directly to the Gateway, bypassing Erlang.
+This created a "black hole" where Erlang's internal state became desynchronized from the actual system state.
 
-\textbf{Solution}: \textbf{Polyglot Communication Strategy}
-
-\begin{tabular}{l l l l}
-    Communication Pattern & Protocol & Use Case & Components \\
-    Synchronous RPC & HTTP/REST & Job submission, status queries & Client $\leftrightarrow$ API Gateway \\
-    Asynchronous Messaging & AMQP & Job distribution & API Gateway $\leftrightarrow$ Workers \\
-    Real-time Updates & SSE/WebSocket & Live job monitoring & API Gateway $\leftrightarrow$ Clients \\
-    Inter-node Coordination & Erlang Messaging & Raft consensus & Orchestrator $\leftrightarrow$ Orchestrator \\
-    Health Monitoring & HTTP & Worker heartbeats & Workers $\rightarrow$ Orchestrator \\
-\end{tabular}
-
-\textbf{Example}: \textbf{Java} $\rightarrow$ \textbf{Erlang Communication (HTTP)}
-
-\begin{lstlisting}[language=Java, caption={Erlang Communication (HTTP) - Java}, label={lst:java-erlang-communication-http-java-side}]
-// Java side
-@PostMapping("/api/jobs")
-public ResponseEntity<Job> submitJob(@RequestBody JobRequest request) {
-    Job job = jobService.createJob(request);
-
-    // HTTP call to Erlang orchestrator
-    erlangRestClient.registerJob(job)
-        .subscribe(response -> log.info("Job registered: {}", response));
-
-    return ResponseEntity.accepted().body(job);
-}
-\end{lstlisting}
-
-\begin{lstlisting}[language=Erlang, caption={Erlang Communication (HTTP) - Erlang}, label={lst:java-erlang-communication-http-erlang-side}]
-% Erlang side (http_server.erl)
-handle_register_job(Req, State) ->
-    {ok, Body, Req2} = cowboy_req:read_body(Req),
-    Job = jsx:decode(Body, [return_maps]),
-    distriqueue:register_job(Job),
-    cowboy_req:reply(202, ?CONTENT_JSON,
-        jsx:encode(#{status => accepted}), Req2).
-\end{lstlisting}
-
-
-\subsection{Challenge 7: Real-time Updates}\label{subsec:challenge-7:-real-time-updates}
-
-\textbf{Problem}: Clients need immediate visibility into job status changes without polling.
-
-\textbf{Solution}: \textbf{Server-Sent Events (SSE)}
-
-\begin{lstlisting}[language=Java, caption={Server-Sent Events (SSE)}, label={lst:server-sent-events}]
-// Java side
-@GetMapping(value = "/jobs/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-public SseEmitter streamJobUpdates() {
-    SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
-
-    // Register emitter for this client
-    sseEmitters.put(clientId, emitter);
-
-    emitter.onCompletion(() -> sseEmitters.remove(clientId));
-    emitter.onTimeout(() -> sseEmitters.remove(clientId));
-
-    return emitter;
-}
-
-// When job status changes
-private void broadcastJobUpdate(Job job) {
-    sseEmitters.forEach((id, emitter) -> {
-        try {
-            emitter.send(SseEmitter.event()
-                .name("job-update")
-                .data(Map.of(
-                    "jobId", job.getId(),
-                    "status", job.getStatus(),
-                    "timestamp", Instant.now()
-                )));
-        } catch (IOException e) {
-            sseEmitters.remove(id);
-        }
-    });
-}
-\end{lstlisting}
-
-
-\subsection{Challenge 8: Cross-node State Synchronization}\label{subsec:challenge-8:-cross-node-state-synchronization}
-
-\textbf{Problem}: State changes in one orchestrator node must propagate to all other nodes.
-
-\textbf{Solution}: \textbf{Gossip Protocol with Vector Clocks}
-
-\begin{lstlisting}[language=Erlang, caption={Gossip Protocol with Vector Clocks}, label={lst:gossip-protocol-with-vector-clocks}]
-% Broadcast update to all peers (job_registry.erl)
-broadcast_job_update(Job) ->
-    Nodes = [N || N <- nodes(), N /= node()],
-    lists:foreach(
-        fun(Node) ->
-            gen_server:cast({?MODULE, Node}, {sync_job, Job})
-        end, Nodes).
-
-% Merge conflict resolution using vector clocks
-merge_job_state(LocalJob, RemoteJob, LocalClock, RemoteClock) ->
-    case compare_clocks(LocalClock, RemoteClock) of
-        gt -> LocalJob;        % Local is newer
-        lt -> RemoteJob;       % Remote is newer
-        eq -> LocalJob;        % Concurrent, arbitrary choice
-        concurrent -> merge_jobs(LocalJob, RemoteJob)  % CRDT merge
-    end.
-\end{lstlisting}
-
-
-\section{Fault Tolerance Challenges}\label{sec:fault-tolerance-challenges}
-
-
-\subsection{Challenge 9: Node Failure Detection}\label{subsec:challenge-9:-node-failure-detection}
-
-\textbf{Problem}: Quickly detecting failed nodes to trigger recovery.
-
-\textbf{Solution}: \textbf{Heartbeat Monitoring}
-
-\begin{lstlisting}[language=Erlang, caption={Heartbeat Monitoring}, label={lst:heartbeat-monitoring}]
-% Health monitor (health_monitor.erl)
-handle_info(check_health, State) ->
-    Now = erlang:system_time(millisecond),
-    Timeout = app:get_env(heartbeat_timeout, 120000),
-
-    lists:foreach(
-        fun({Node, LastHeartbeat}) ->
-            if Now - LastHeartbeat > Timeout ->
-                lager:warning("Node ~p unresponsive", [Node]),
-                trigger_recovery(Node);
-               true -> ok
-            end
-        end, State#state.last_heartbeats),
-
-    erlang:send_after(30000, self(), check_health),
-    {noreply, State}.
-\end{lstlisting}
-
-
-\subsection{Challenge 10: Split-Brain Prevention}\label{subsec:challenge-10:-split-brain-prevention}
-
-\textbf{Problem}: Network partitions can lead to multiple nodes believing they are the leader.
-
-\textbf{Solution}: \textbf{Quorum-based Decisions}
-
-\begin{lstlisting}[language=Erlang, caption={Quorum-based Decisions}, label={lst:quorum-based-decisions}]
-% Raft requires majority for all decisions
-commit_if_majority(LogEntry, State) ->
-    Majority = (length(State#state.peers) + 1) div 2 + 1,
-    AckCount = length(State#state.match_index),
-
-    if AckCount >= Majority ->
-        commit_entry(LogEntry),
-        State#state{commit_index = State#state.commit_index + 1};
-       true ->
-        State
-    end.
-\end{lstlisting}
+\textbf{Solution}: \textbf{Erlang as the Single Source of Truth}.
+The architecture was refactored so workers report strictly to Erlang via HTTP. Erlang updates its Mnesia/CRDT tables, encodes the complex mathematical results using \texttt{jsx}, and uses the \texttt{rabbitmq\_client.erl} to broadcast a definitive AMQP status payload to the Gateway.
 

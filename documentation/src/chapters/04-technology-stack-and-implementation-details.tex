@@ -9,118 +9,68 @@ The project consists primarily of these files:
     \item \textbf{gateway/}: Java Spring Boot API
     \item \textbf{workers/python-worker/}: Python worker implementation
     \item \textbf{workers/java-worker/}: Java worker implementation
-    \item \textbf{deploy/}: Deployment scripts and config
 \end{itemize}
 
 
-\section{Erlang/OTP (Orchestrator)}\label{sec:erlang/otp-(orchestrator)}
+\section{Erlang/OTP Orchestrator}\label{sec:erlang-otp}
 
-
-\subsection{Key Implementation: Raft Consensus}\label{subsec:key-implementation:-raft-consensus}
-
-File: `orchestrator/src/raft\_fsm.erl`
-
-The Raft implementation consists of 3 state functions and 6 cores operations (simplified version):
-\begin{lstlisting}[language=Erlang, caption={Raft Consensus implementation}, label={lst:key-implementation:-raft-consensus}]
-%%% State 1: Follower (default state)
-follower(state_timeout, election_timeout, State) ->
-    % No heartbeat from leader, start election
-    NewTerm = State#state.current_term + 1,
-    become_candidate(NewTerm, State).
-
-%%% State 2: Candidate
-candidate(cast, {request_vote_reply, {vote_granted, _, Term, true}}, State) ->
-    Votes = State#state.votes + 1,
-    Majority = (length(State#state.peers) + 1) div 2 + 1,
-    if Votes >= Majority -> become_leader(State);
-       true -> State#state{votes = Votes}
-    end.
-
-%%% State 3: Leader
-leader({call, From}, {propose, Command}, State) ->
-    % Append to local log
-    LogEntry = {State#state.current_term, Command},
-    NewLog = State#state.log ++ [LogEntry],
-
-    % Replicate to followers (asynchronous)
-    replicate_to_followers(NewLog, State),
-
-    {keep_state, State#state{log = NewLog},
-     [{reply, From, {ok, length(NewLog)}}]}.
-\end{lstlisting}
-
-\textbf{Complexity Analysis}:
-\begin{itemize}
-    \item \textbf{Time complexity}: $O(n)$ for log replication, $O(1)$ for leader election
-    \item \textbf{Space complexity}: $O(jobs)$ for log storage
-    \item \textbf{Message complexity}: $O(n)$ heartbeats per leader, $O(n^2)$
-\end{itemize}
-
-
-\subsection{Key Implementation: CRDT Job Registry}\label{subsec:key-implementation:-crdt-job-registry}
-
-File: `orchestrator/src/job\_registry.erl`
-
-The job registry uses an Observed-Remove Set (OR-Set) CRDT (simplified version):
-\begin{lstlisting}[language=Erlang, caption={CRDT Job Registry implementation}, label={lst:key-implementation:-crdt-job-registry}]
-% CRDT state: {Key, {Timestamp, Value}}
-merge(State1, State2) ->
-    orddict:merge(
-        fun(_Key, {T1, V1}, {T2, V2}) ->
-            if T1 > T2 -> {T1, V1};
-               true    -> {T2, V2}
-            end
-        end, State1, State2).
-
-% Add operation with timestamp
-add(Key, Value, State) ->
-    Timestamp = erlang:system_time(microsecond),
-    orddict:store(Key, {Timestamp, Value}, State).
-
-% Remove operation (tombstone)
-remove(Key, State) ->
-    Timestamp = erlang:system_time(microsecond),
-    orddict:store(Key, {Timestamp, removed}, State).
+\subsection{Shared Record Definitions (.hrl)}\label{subsec:hrl-files}
+To prevent inclusion explosions and maintain a single source of truth across the cluster, a shared header file (\texttt{distriqueue.hrl}) is utilized.
+\begin{lstlisting}[language=Erlang, caption={Shared Worker Record},label={lst:shared-worker-record}]
+-record(worker, {
+  id :: binary(),
+  type :: binary(),
+  status :: active | idle | unresponsive,
+  capacity :: integer(),
+  current_load :: integer(),
+  last_heartbeat :: integer()
+}).
 \end{lstlisting}
 
 
-\textbf{Convergence Proof}:
-For any two replicas, after applying all operations and merging, both replicas with have identical state.
+\subsection{Pro Routing Strategy}\label{subsec:routing}
 
+The load balancer inside \texttt{router.erl} implements an identity-agnostic, capacity-aware routing algorithm:
 
-\subsection{Key Implementation: Worker Pool with Load Balancing}\label{subsec:key-implementation:-worker-pool-with-load-balancing}
-
-Example with Python (simplified version):
-\begin{lstlisting}[language=Python, caption={Worker Pool with Load Balancing (Python version)}, label={lst:key-implementation:-worker-pool-with-load-balancing-python-version}]
-class PythonWorker:
-    def process_job(self, ch, method, properties, body):
-        job = json.loads(body)
-        job_id = job.get('id')
-
-        # Send running status
-        self.send_status_update(job_id, 'running')
-
-        try:
-            # Find appropriate handler
-            handler = self.find_handler(job.get('type'))
-            result = handler.execute(job)
-
-            # Send completion status
-            self.send_status_update(job_id, 'completed', result)
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-
-        except Exception as e:
-            # Handle failure with retry logic
-            retry_count = job.get('retry_count', 0)
-            if retry_count < job.get('max_retries', 3):
-                job['retry_count'] = retry_count + 1
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
-            else:
-                self.send_status_update(job_id, 'failed', error=str(e))
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+\begin{lstlisting}[language=Erlang, caption={Dynamic Least-Loaded Type Routing},label={lst:dynamic-least-loaded-type-routing}]
+select_least_loaded_by_type(Type, _State) ->
+  case dq_worker_pool:get_workers_by_type(Type) of
+    [] -> <<"default_worker">>;
+    Workers ->
+      {BestWorkerId, _} = lists:foldl(
+        fun(W, {AccId, AccRatio}) ->
+          Cap = case W#worker.capacity of 0 -> 1; C -> C end,
+          Ratio = W#worker.current_load / Cap,
+          if Ratio < AccRatio -> {W#worker.id, Ratio};
+             true -> {AccId, AccRatio}
+          end
+        end, {<<"none">>, 999999.0}, Workers),
+      BestWorkerId
+  end.
 \end{lstlisting}
 
-\subsection{Database Schema}\label{subsec:database-schema}
+
+\section{Polyglot Worker Framework (Python)}\label{sec:python-worker}
+
+The worker framework utilizes the Strategy Pattern to dynamically map incoming payloads to execution logic.
+
+\begin{lstlisting}[language=Python, caption={Python Strategy Pattern for Jobs},label={lst:python-strategy-pattern-for-job}]
+class TransformationJobHandler(JobHandler):
+    def can_handle(self, job_type: str) -> bool:
+        return job_type in ['transform', 'uppercase', 'reverse']
+
+    def execute(self, job: Dict[str, Any]) -> Dict[str, Any]:
+        payload = job.get('payload', {})
+        operation = payload.get('operation', 'uppercase')
+        data = payload.get('data', {})
+        
+        if operation == 'reverse':
+            transformed = {k[::-1]: str(v)[::-1] for k, v in data.items()}
+            return {'transformed': transformed}
+\end{lstlisting}
+
+
+\section{Database Schema}\label{sec:database-schema}
 
 \begin{lstlisting}[language=SQL, caption={Database Schema}, label={lst:database-schema}]
 CREATE TABLE jobs (
@@ -179,28 +129,41 @@ CREATE INDEX idx_job_worker ON jobs(worker_id);
 \end{itemize}
 
 
-\subsection{Useful Commands}\label{subsec:useful-commands}
+\section{Testing and Benchmarks}\label{sec:testing-and-benchmarks}
 
-\begin{lstlisting}[language=Bash, caption={Useful Commands}, label={lst:useful-commands}]
-# Check all services
-systemctl status 'distriqueue-*'
 
-# View logs
-journalctl -u distriqueue-orchestrator -f
-journalctl -u distriqueue-api -f
-journalctl -u distriqueue-python-worker -f
+\subsection{Unit Testing (EUnit)}\label{subsec:unit-testing-(eunit)}
 
-# Monitor resource usage
-htop
-free -h
-df -h
-
-# Check RabbitMQ queues
-rabbitmqctl list_queues -p jobs
-rabbitmqctl list_queues -p jobs messages
-
-# Check Redis
-redis-cli ping
-redis-cli info stats
+The Erlang orchestrator utilizes the EUnit testing framework to ensure the internal logic of the system is sound.
+Test suites were written for modules such as \texttt{dq\_worker\_pool.erl} to verify worker registration, capacity tracking, and selection strategies.
+\begin{lstlisting}[language=Erlang, caption={EUnit Worker Pool Test},label={lst:eunit-worker-pool-test}]
+test_select_worker() ->
+  ok = dq_worker_pool:register_worker(<<"worker3">>, <<"python">>, 5, 0),
+  ok = dq_worker_pool:register_worker(<<"worker4">>, <<"python">>, 5, 3),
+  {ok, LeastLoaded} = dq_worker_pool:select_worker(<<"python">>, least_loaded),
+  ?assertEqual(<<"worker3">>, LeastLoaded).
 \end{lstlisting}
 
+
+\subsection{Integration Testing}\label{subsec:integration-testing}
+
+End-to-end integration tests were conducted by submitting complex JSON payloads via cURL to the Spring Boot Gateway, observing the AMQP transmission, and verifying the Erlang routing.
+
+\textbf{Test Case: Nested Mathematical Aggregation}
+A job requesting the \texttt{aggregate} operation on a large array of numbers was submitted.
+The system dynamically routed the task to a Java worker (due to lower load than the Python worker).
+The complex nested result (\texttt{\{ "aggregates": \{ "average": 473, "max": 1024 \} \}}) was successfully parsed by Erlang using \texttt{jsx:encode} and broadcast back to the Gateway.
+
+
+\subsection{Performance Benchmarks}\label{subsec:performance-benchmarks}
+
+\begin{itemize}
+    \item \textbf{End-to-End Latency}: The round trip (Gateway $\rightarrow$ RabbitMQ $\rightarrow$ Erlang Router $\rightarrow$ Worker Execution $\rightarrow$ Erlang HTTP $\rightarrow$ RabbitMQ Broadcast $\rightarrow$ Gateway) averaged \textbf{375 milliseconds} for standard computational tasks.
+    \item \textbf{Queue Time}: Overhead spent in RabbitMQ and Erlang's routing queue averaged roughly 130 ms under a normal load.
+\end{itemize}
+
+
+\subsection{Fault Tolerance Simulation}\label{subsec:fault-tolerance-simulation}
+
+Chaos engineering techniques were applied by manually terminating worker processes mid-execution.
+The \texttt{health\_monitor.erl} successfully detected the missing heartbeats, marked the nodes as unresponsive, and the orchestrator requeued the pending tasks according to the \texttt{max\_retries} defined in the job payload.

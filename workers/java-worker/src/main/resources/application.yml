@@ -22,6 +22,10 @@ spring:
     time-zone: UTC
     # Note: write-dates-as-timestamps removed as it's not supported in this version's enum
 
+server:
+  servlet:
+    context-path: /api
+
 # Worker Configuration
 distriqueue:
   worker:

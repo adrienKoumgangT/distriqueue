@@ -63,9 +63,6 @@ init([]) ->
 
 handle_call({publish_job, Queue, Job}, _From, State) ->
   try
-    %% FIXED: Convert Job record to Map before encoding
-    %JobMap = job_registry:job_to_map(Job),
-    %JobJson = job_registry:job_to_json(JobMap),
     JobJson = job_registry:job_to_json(Job),
 
     %% Ensure we can extract priority
@@ -120,17 +117,17 @@ handle_cast({cancel_job, JobId}, State) ->
 
 handle_cast({publish_status, JobId, Status, WorkerId, Result}, State) ->
   try
-    %% 1. Format the status safely to uppercase binary (e.g., <<"COMPLETED">>)
+    %% Format the status safely to uppercase binary (e.g., <<"COMPLETED">>)
     UpperStatus = string:uppercase(atom_to_binary(Status, utf8)),
 
-    %% 2. Build the exact JSON payload the Gateway expects
+    %% Build the exact JSON payload the Gateway expects
     Payload0 = #{
       <<"jobId">> => JobId,
       <<"jobStatus">> => UpperStatus,
       <<"workerId">> => WorkerId
     },
 
-    %% 3. Safely attach the mathematical result if it exists
+    %% Safely attach the mathematical result if it exists
     Payload = case Result of
                 undefined -> Payload0;
                 _ -> Payload0#{<<"result">> => Result}
@@ -138,7 +135,7 @@ handle_cast({publish_status, JobId, Status, WorkerId, Result}, State) ->
 
     JsonBinary = jsx:encode(Payload),
 
-    %% 4. Define properties and publish
+    %% Define properties and publish
     Props = #'P_basic'{content_type = <<"application/json">>},
     BasicPublish = #'basic.publish'{
       exchange = <<"status.exchange">>,

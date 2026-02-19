@@ -1,63 +1,45 @@
 \chapter{Introduction}\label{ch:introduction}
 
+TaskForce is a distributed job scheduling system designed to process complex heterogeneous tasks across a polyglot cluster.
+The system demonstrates the practical application of fundamental distributed systems concepts,
+including consensus algorithms, message-oriented middleware, fault tolerance, and distributed coordination, fulfilling all requirements of the Distributed Systems course.
 
-TaskForce is a distributed job scheduling system.
-The system demonstrates the practical application of fundamental distributed systems concepts including consensus algorithms,
-message-oriented middleware, fault tolerance, and distributed coordination.
-
-The project implements a complete job scheduling pipeline with:
+The project implements a complete job scheduling pipeline featuring:
 \begin{itemize}
-    \item \textbf{Erlang/OTP orchestrator}\cite{erlang} using Raft consensus for leader election
-    \item \textbf{RabbitMQ cluster}\cite{rabbitmq} with priority-based queuing and dead letter handling
-    \item \textbf{Java Spring Boot API gateway}\cite{springboot} with REST endpoints and real-time SSE updates
-    \item \textbf{Polyglot worker farm} supporting Python and Java job execution
-    \item \textbf{Comprehensive monitoring} with Prometheus and Grafana
-    \item \textbf{Multi-node deployment} on Docker containers and Ubuntu VMs
+    \item \textbf{Erlang/OTP Orchestrator}\cite{erlang}: A robust coordinator utilizing the Raft consensus algorithm for leader election and CRDTs for state management.
+    \item \textbf{RabbitMQ Cluster}\cite{rabbitmq}: Message-Oriented Middleware providing reliable, priority-based asynchronous queuing.
+    \item \textbf{Java Spring Boot API Gateway}\cite{springboot}: A web-facing entry point with REST endpoints and real-time Server-Sent Events (SSE) streaming.
+    \item \textbf{Polyglot Worker Farm}: Heterogeneous execution nodes supporting Python and Java implementations.
+    \item \textbf{Multi-node Deployment}: Distributed across Ubuntu VMs (Adrien0, Adrien1) with automatic failover.
 \end{itemize}
 
-The system successfully handles concurrent jb submissions, automatically recovers from node failures,
-maintains exactly-once execution semantics, and scales horizontally by adding worker nodes.
-All course requirements regarding synchronization/coordination, communication, Erlang implementation,
-and multi-node deployment have been fully satisfied.
-
+The system successfully handles concurrent job submissions, automatically recovers from node failures, maintains reliable execution semantics, and scales horizontally.
 
 \section{Background}\label{sec:background}
 
 Distributed systems have become the backbone of modern computing infrastructure.
-From cloud computing platforms to microservices architectures,
-the ability to coordinate work across multiple nodes while maintaining consistency and availability is fundamental.
-Job scheduling - the allocation of computational tasks to worker nodes - represents a classic distributed systems problem
-that encompasses many core challenges: coordination, communication, fault tolerance, and load balancing.
+From cloud computing platforms to microservices architectures, the ability to coordinate work across multiple nodes while maintaining consistency and availability is fundamental.
+Job scheduling-the allocation of computational tasks to worker nodes-represents a classic distributed systems problem that encompasses core challenges: coordination, communication, fault tolerance, and load balancing.
 
 \section{Problem Statement}\label{sec:problem-statement}
 
 Modern distributed applications require reliable job processing systems that can:
 \begin{itemize}
-    \item Handle thousands of concurrent task submissions
-    \item Guarantee exactly-once or at-least-once execution semantics
-    \item Tolerate node failures without data loss
-    \item Scale horizontally as workload increases
-    \item Support heterogeneous execution environments
-    \item Provide real-time visibility into system state
+    \item Handle concurrent task submissions asynchronously.
+    \item Guarantee fault tolerance and state consistency across nodes.
+    \item Scale horizontally as workload increases.
+    \item Support heterogeneous (polyglot) execution environments.
 \end{itemize}
-
-Existing solutions like Apache Airflow, Celery, and AWS Batch are powerful but complex.
-This project aims to build a simplified yet complete distributed job scheduler from first principles,
-demonstrating how fundamental distributed systems algorithms and middleware technologies address these challenges.
+This project aims to build a complete distributed job scheduler from first principles, demonstrating how fundamental distributed algorithms and middleware technologies address these challenges.
 
 \section{Project Scope}\label{sec:project-scope}
 
-The scope of this project includes:
-\begin{itemize}
-    \item Design and implementation of a distributed job scheduler
-    \item Implementation of Raft consensus algorithm for leader election
-    \item Integration with RabbitMQ for reliable message queuing
-    \item Development of a polyglot worker execution framework
-    \item REST API for job submission and management
-    \item Real-time status streaming via Server-Sent Events
-    \item Multi-node deployment on both containers and VMs
-    \item Comprehensive monitoring and observability
-\end{itemize}
+The scope of this project includes the design and implementation of a distributed scheduler, Raft consensus for leader election, AMQP integration, a polyglot worker framework, and comprehensive API design.
 
 
+\vspace{1em}
+\noindent \textbf{Project Repository:} \\
+The complete source code for TaskForce, including the Erlang orchestrator, Java API Gateway, polyglot worker implementations, and deployment scripts, is publicly available on GitHub.
+It can be accessed at: \\
+\url{https://github.com/adrienKoumgangT/distriqueue}
 

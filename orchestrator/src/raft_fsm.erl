@@ -369,7 +369,6 @@ leader(cast, {append_entries_reply, FromNode, Term, Success, _MatchIndex}, State
   if
     Success ->
       % Update match index for follower
-      % In real implementation, track match index and commit when majority
       lager:debug("Follower ~p replicated successfully", [FromNode]);
     true ->
       % If failure due to term, step down

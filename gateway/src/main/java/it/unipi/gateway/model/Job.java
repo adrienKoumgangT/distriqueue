@@ -77,17 +77,17 @@ public class Job implements Serializable {
     @Column(name = "retry_count")
     @Builder.Default
     @Schema(description = "Number of retry attempts", example = "0")
-    private int retryCount = 0;
+    private Integer retryCount = 0;
 
     @Column(name = "max_retries")
     @Builder.Default
     @Schema(description = "Maximum retry attempts", example = "3")
-    private int maxRetries = 3;
+    private Integer maxRetries = 3;
 
     @Column(name = "execution_timeout")
     @Builder.Default
     @Schema(description = "Execution timeout in seconds", example = "300")
-    private int executionTimeout = 300;
+    private Integer executionTimeout = 300;
 
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -127,7 +127,7 @@ public class Job implements Serializable {
     @Column(name = "callback_sent")
     @Builder.Default
     @Schema(description = "Indicates if the webhook callback was successfully sent")
-    private boolean callbackSent = false;
+    private Boolean callbackSent = false;
 
     @Column(name = "tags", length = 500)
     @Schema(description = "Comma-separated job tags")

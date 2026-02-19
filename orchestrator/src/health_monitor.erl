@@ -73,7 +73,6 @@ handle_info(check_health, State) ->
     last_check = erlang:system_time(millisecond)
   }};
 
-%% FIX: Added catch-all to prevent crashes on unknown messages
 handle_info(_Info, State) ->
   {noreply, State}.
 

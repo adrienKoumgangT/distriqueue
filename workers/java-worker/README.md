@@ -1,59 +1,48 @@
 # DistriQueue Java Worker
 
-Java worker service for the DistriQueue platform.
-It consumes jobs from RabbitMQ, processes them asynchronously, and posts status updates back to the API gateway.
-It also exposes health and Prometheus metrics via Spring Boot Actuator.
+`java-worker` is a Spring Boot worker service for DistriQueue.
 
-## Features
-- RabbitMQ consumers with priority queues and retry handling.
-- Job handlers for calculation, transformation, and validation tasks.
-- Status updates to the orchestrator/API gateway.
-- Worker health checks and heartbeat reporting.
-- Micrometer + Prometheus metrics.
+It:
+- consumes jobs from RabbitMQ priority queues (`job.high`, `job.medium`, `job.low`)
+- dispatches jobs to typed handlers (`calculate`, `transform`, `validate`, etc.)
+- sends job status updates to the orchestrator/API
+- sends heartbeat events to Erlang orchestrator nodes
+- exposes Actuator + Prometheus metrics
 
-## Architecture
-- `JobConsumer` listens on the configured queues and dispatches to a matching `JobHandler`.
-- Handlers run asynchronously and return a `JobResult`.
-- Status updates are posted to `distriqueue.worker.status.update-url`.
-- Metrics are exported on `/worker/actuator/prometheus`.
+## Runtime Architecture
+- `JobConsumer` listens on queues from `distriqueue.worker.queues`.
+- Each job is routed to a `JobHandler` implementation:
+  - `CalculationJobHandler`: `calculate`, `sort`, `aggregate`
+  - `TransformationJobHandler`: `transform`, `filter`
+  - `ValidationJobHandler`: `validate`
+- Processing runs asynchronously with `jobProcessingExecutor`.
+- Status updates are posted by `StatusUpdateService`.
+- Heartbeats are sent by `HealthService` to each configured Erlang node.
 
-## Job Types
-Supported job types are defined in `Job.Types`:
-- `calculate`, `sort`, `aggregate` (calculation handler)
-- `transform`, `filter` (transformation handler)
-- `validate` (validation handler)
-
-Payload formats are flexible JSON maps. See handler implementations for supported operations.
+## Requirements
+- Java `25` (from `pom.xml`)
+- Maven (or use `./mvnw`)
+- RabbitMQ reachable from worker hosts
 
 ## Configuration
-Key settings are in `src/main/resources/application.yml`.
+Main config file: `src/main/resources/application.yml`
 
-### Environment variables
-- `RABBITMQ_HOST` (default: `rabbitmq1`)
-- `RABBITMQ_PORT` (default: `5672`)
+Important environment variables:
+- `RABBITMQ_ADDRESSES` (default: `10.2.1.11:5672,10.2.1.12:5672`)
 - `RABBITMQ_USERNAME` (default: `admin`)
 - `RABBITMQ_PASSWORD` (default: `admin`)
 - `WORKER_ID` (default: `java-worker-${random.uuid}`)
 - `WORKER_TYPE` (default: `java`)
-- `WORKER_CAPACITY` (default: `10`)
-- `STATUS_UPDATE_URL` (default: `http://api-gateway:8080/api/jobs/status`)
-- `SERVER_PORT` (default: `8082`)
-- `DISTRIQUEUE_ERLANG_NODES` (comma-separated, maps to `distriqueue.erlang.nodes`)
+- `WORKER_CAPACITY` (default: `15`)
+- `QUEUES` (default: `job.high,job.medium,job.low`)
+- `STATUS_UPDATE_URL` (default: `http://10.2.1.11:8081/api/jobs/status`)
 
-### Queues
-The worker consumes from:
-- `job.high`
-- `job.medium`
-- `job.low`
+Also configured by default:
+- Erlang nodes: `orchestrator@10.2.1.11,orchestrator@10.2.1.12`
+- listener concurrency: `3..10`
+- job concurrency: `5`
 
-Queues are bound to the direct exchange `jobs.exchange` with the same routing keys.
-A dead-letter queue `job.dead-letter` is also declared.
-
-## Running locally
-Requirements:
-- Java 21
-- RabbitMQ
-
+## Local Run
 ```bash
 ./mvnw spring-boot:run
 ```
@@ -63,22 +52,46 @@ Requirements:
 ./mvnw clean package
 ```
 
-## Docker
-The Dockerfile expects a built JAR at `target/java-worker-1.0.0.jar`.
+Expected artifact:
+- `target/java-worker-0.0.1-SNAPSHOT.jar`
 
+## Deploy On 2 VMs (10.2.1.11 and 10.2.1.12)
+Deploy one worker instance per VM with identical config (except `WORKER_ID`).
+
+### 1. Copy artifact to both VMs
 ```bash
 ./mvnw clean package
-docker build -f docker/Dockerfile -t distriqueue/java-worker:local .
+scp target/java-worker-0.0.1-SNAPSHOT.jar user@10.2.1.11:/opt/distriqueue/java-worker/app.jar
+scp target/java-worker-0.0.1-SNAPSHOT.jar user@10.2.1.12:/opt/distriqueue/java-worker/app.jar
 ```
 
-## Endpoints
-- Health: `http://localhost:8082/api/worker/actuator/health`
-- Metrics (Prometheus): `http://localhost:8082/api/worker/actuator/prometheus`
-- Info/Metrics: `http://localhost:8082/api/worker/actuator/metrics`
+### 2. Environment per VM
+Use this on both VMs:
+```bash
+export RABBITMQ_ADDRESSES=10.2.1.11:5672,10.2.1.12:5672
+export RABBITMQ_USERNAME=admin
+export RABBITMQ_PASSWORD=admin
+export STATUS_UPDATE_URL=http://10.2.1.11:8081/api/jobs/status
+export QUEUES=job.high,job.medium,job.low
+export WORKER_TYPE=java
+```
 
-## Status updates
-Status updates are sent as JSON to the configured `STATUS_UPDATE_URL`.
+Set a different worker ID on each VM:
+- VM `10.2.1.11`: `WORKER_ID=java-worker-10-2-1-11`
+- VM `10.2.1.12`: `WORKER_ID=java-worker-10-2-1-12`
 
-## Development notes
-- Retry behavior is configured both at the RabbitMQ listener and in handler logic.
-- Job processing concurrency is controlled by `distriqueue.worker.job.concurrency`.
+### 3. Start worker
+```bash
+java -jar /opt/distriqueue/java-worker/app.jar
+```
+
+## Health and Metrics
+Actuator endpoints (default port `8080` unless overridden, with `server.servlet.context-path: /api`):
+- `/api/actuator/health`
+- `/api/actuator/info`
+- `/api/actuator/metrics`
+- `/api/actuator/prometheus`
+
+Example:
+- `http://<worker-host>:8080/api/actuator/health`
+- `http://<worker-host>:8080/api/actuator/prometheus`

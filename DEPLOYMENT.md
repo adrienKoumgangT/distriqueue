@@ -4,65 +4,158 @@
 
 1. Two Ubuntu 24.04 VMs with IPs: 10.2.1.3, 10.2.1.4
 2. Java 25.0.1-open installed
-3. Erlang/OTP 28 installed
-4. Maven 3.9.11 installed
-5. Git installed
+3. Python 3.11+ and Python3 env installed
+4. Erlang/OTP 28 installed
+5. Maven 3.9.11 installed
+6. Git installed
 
-## Steps
 
-### Step 1: Clone and Build
+## Deployment Steps
+
+
+### Download DistriQueue
 
 ```bash
+cd /opt
+
+rm -rf distriqueue/
+
 git clone https://github.com/adrienKoumgangT/distriqueue.git
+
 cd distriqueue
-chmod +x deploy/scripts/build.sh
-./deploy/scripts/build.sh
 ```
 
-### Step 2: Configure VMs
+### Orchestrator (Erlang Nodes)
 
 ```bash
-git clone https://github.com/adrienKoumgangT/distriqueue.git
-cd distriqueue
-chmod +x deploy/scripts/build.sh
-./deploy/scripts/build.sh
+cd /opt/distriqueue/orchestrator/
+
+# for vm2 (10.2.1.12)
+# edit config/sys.config and config/vm.args
+# replace 10.2.1.11 with 10.2.1.12
+# nano config/sys.config # replace orchestrator@Adrien0.local with orchestrator@Adrien1.local
+# nano config/vm.args #  replace orchestrator@Adrien0 with orchestrator@Adrien1 and vice versa
+
+chmod +x build-orchestrator.sh
+
+./build-orchestrator.sh
+
+/opt/distriqueue/orchestrator/_build/default/rel/distriqueue/bin/distriqueue daemon
 ```
 
-### Step 3: Deploy to VM1
-
+**To check if it is up and running:**
 ```bash
-# From your local machine:
-scp deploy/distriqueue-vm-deployment.tar.gz ubuntu@10.2.1.3:/tmp/
-ssh ubuntu@10.2.1.3
-cd /tmp
-tar -xzf distriqueue-vm-deployment.tar.gz
-cd deploy
-sudo ./scripts/deploy-vm1.sh
+curl -s http://localhost:8081/api/health
+
+curl -s http://localhost:8081/api/raft/status
 ```
 
-### Step 4: Deploy to VM2
-
+**To stop it and kill all the Erlang processes:**
 ```bash
-# From your local machine:
-scp deploy/distriqueue-vm-deployment.tar.gz ubuntu@10.2.1.4:/tmp/
-ssh ubuntu@10.2.1.4
-cd /tmp
-tar -xzf distriqueue-vm-deployment.tar.gz
-cd deploy
-sudo ./scripts/deploy-vm2.sh
+cd /opt/distriqueue/orchestrator/
+
+_build/default/rel/distriqueue/bin/distriqueue stop
+
+pkill -9 beam.smp
+
+pkill -9 heart
+
+# If we want to clean the build:
+# rm -rf _build/
 ```
 
-### Step 5: Verify Deployment
+### Python Workers
 
 ```bash
-./deploy/scripts/verify-deployment.sh
+cd /opt/distriqueue/workers/python-worker/
+
+python3 -m venv worker-env
+
+source worker-env/bin/activate
+
+pip install -r requirements.txt
+
+export ORCHESTRATOR_URL="http://10.2.1.11:8081"
+# for vm2 (10.2.1.12): export ORCHESTRATOR_URL="http://10.2.1.12:8081"
+
+export STATUS_UPDATE_URL="http://10.2.1.11:8081/api/jobs/status"
+# for vm2(10.2.1.12): export STATUS_UPDATE_URL="http://10.2.1.11:8082/api/jobs/status"
+
+python worker.py
+```
+
+To launch this worker in the background:
+```bash
+nohup python3 worker.py > worker.log 2>&1 &
+
+# To see the live logs anytime:
+tail -f worker.log
+
+
+# To kill the worker:
+kill -9 $(pgrep -f "python3 worker.py")
+# or
+pkill -f "python3 worker.py"
+```
+
+
+### Java Workers
+
+```bash
+cd /opt/distriqueue/workers/java-worker/
+
+mvn clean package -DskipTests
+
+export RABBITMQ_ADDRESSES="10.2.1.12:5672"
+# for vm2 (10.2.1.12): export RABBITMQ_ADDRESSES="10.2.1.12:5672"
+
+export STATUS_UPDATE_URL="http://10.2.1.11:8081/api/jobs/status"
+# for vm2 (10.2.1.12): export STATUS_UPDATE_URL="http://10.2.1.12:8082/api/jobs/status"
+
+java -jar target/java-worker-0.0.1-SNAPSHOT.jar
+```
+
+To launch this worker in the background:
+```bash
+nohup java -jar target/java-worker-0.0.1-SNAPSHOT.jar > worker.log 2>&1 &
+
+# To see the live logs anytime:
+tail -f worker.log
+
+kill -9 $(pgrep -f "java -jar target/java-worker-0.0.1-SNAPSHOT.jar")
+# or
+pkill -f "java -jar target/java-worker-0.0.1-SNAPSHOT.jar"
+```
+
+### APi Gateway
+```bash
+cd /opt/distriqueue/gateway/
+
+mvn clean package -DskipTests
+
+java -jar target/gateway-0.0.1-SNAPSHOT.jar
+```
+
+**To test the system**:
+Call the API Gateway with a POST request to POST http://10.2.1.11:8080/api/jobs with the following body:
+```json
+{
+  "type": "calculate",
+  "jobPriority": "HIGH",
+  "payload": {
+    "operation": "sum",
+    "numbers": [1000, 2000, 3000]
+  },
+  "maxRetries": 3,
+  "executionTimeout": 300
+}
 ```
 
 ## Access Points
 
 - API Gateway: http://10.2.1.3:8080, http://10.2.1.4:8080
 - H2 Console: http://10.2.1.3:8082/h2-console (JDBC: jdbc:h2:file:/opt/distriqueue/data/h2/distriqueue)
-- RabbitMQ Management: http://10.2.1.3:15672 (admin/SecurePass123!)
+- RabbitMQ Management: http://10.2.1.3:15672 (admin/admin!)
 - Erlang Orchestrator API: http://10.2.1.3:8081/api/cluster/status
 
 ## Monitoring

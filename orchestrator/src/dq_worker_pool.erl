@@ -1,13 +1,16 @@
 %%%-------------------------------------------------------------------
-%%% @author adrienkt
+%%% @author adrien koumgang tegantchouang
 %%% @copyright (C) 2026, University of Pise
 %%% @doc
 %%% Worker Pool Manager - Manages worker registration, health monitoring,
 %%% and load balancing for the DistriQueue distributed job scheduler.
+%%% @end
 %%%-------------------------------------------------------------------
 -module(dq_worker_pool).
--author("adrienkt").
+-author("adrien koumgang tegantchouang").
 -behaviour(gen_server).
+
+-include("distriqueue.hrl").
 
 %% API
 -export([start_link/0,
@@ -32,20 +35,6 @@
   code_change/3]).
 
 %% Records
--record(worker, {
-  id :: binary(),
-  type :: binary(),
-  status :: active | idle | unresponsive | overloaded | draining,
-  capacity :: integer(),
-  current_load :: integer(),
-  last_heartbeat :: integer(),
-  registered_at :: integer(),
-  total_jobs_processed :: integer(),
-  failed_jobs :: integer(),
-  avg_processing_time :: float(),
-  metadata :: map()
-}).
-
 -record(state, {
   workers = #{} :: #{binary() => #worker{}},
   by_type = #{} :: #{binary() => [binary()]},

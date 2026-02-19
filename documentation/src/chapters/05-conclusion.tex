@@ -1,29 +1,54 @@
 \chapter{Conclusion}\label{ch:conclusion}
 
-TaskForce successfully demonstrates a complete distributed job scheduling system that addresses the core challenge of distributed systems:
-coordination, communication, and fault tolerance.
-The project fulfills all course requirements:
+TaskForce successfully demonstrates a complete distributed job scheduling system that addresses the core challenges of distributed systems: coordination, communication, and fault tolerance.
 
+The project fulfills all course requirements:
 \begin{enumerate}
-    \item \textbf{Synchronization/Coordination}: Raft consensus, CRDTs, distributed locks
-    \item \textbf{Communication}: RabbitMQ, HTTP/REST, SSE, Erlang messaging
-    \item \textbf{Erlang Component}: Full orchestrator with OTP behaviors
-    \item \textbf{Multi-node Deployment}: VM deployments
+    \item \textbf{Synchronization/Coordination}: Addressed via Raft consensus for leader election and CRDTs for eventual consistency.
+    \item \textbf{Communication}: Addressed via RabbitMQ AMQP queues, RESTful APIs, and Erlang asynchronous messaging.
+    \item \textbf{Erlang Component}: The core orchestrator is built entirely in Erlang using OTP behaviours (\texttt{gen\_server}, \texttt{gen\_statem}, \texttt{supervisor}).
+    \item \textbf{Multi-node Deployment}: Successfully deployed across multiple Ubuntu Virtual Machines.
 \end{enumerate}
 
 The system achieves:
 \begin{itemize}
-    \item \textbf{High availability} through clustering and automatic failover
-    \item \textbf{Scalability} by adding worker nodes
-    \item \textbf{Reliability} with exactly-once execution semantics
-    \item \textbf{Observability} via comprehensive monitoring
-    \item \textbf{Extensibility} through polyglot worker architecture
+    \item \textbf{High availability} through clustering and automatic failover.
+    \item \textbf{Scalability} by dynamically routing to polyglot worker nodes based on capacity.
+    \item \textbf{Reliability} with exactly-once execution semantics and RabbitMQ dead-lettering.
+    \item \textbf{Extensibility} through an identity-agnostic Strategy Pattern worker architecture.
 \end{itemize}
 
-This project represents not just a course requirement, but a production-quality distributed system that demonstrates deep understanding of
-distributed systems principles and their practical implementation.
-The code is well-structured, documented, and ready for extension.
+This project represents a production-quality distributed system that demonstrates a deep understanding of distributed systems principles and their practical implementation.
+The experience gained from integrating advanced Erlang paradigms with modern Java Enterprise APIs and RabbitMQ has provided invaluable insight into the realities of distributed systems engineering.
 
-The experience gained from implementing Raft from scratch, integrating multiple technologies, and deploying on real VMs has provided invaluable insight
-into the challenges and solutions in distributed systems engineering.
+
+\section{Use of Artificial Intelligence}\label{sec:use-of-artificial-intelligence}
+
+During the development of TaskForce, a Large Language Model (Google Gemini) was utilized as an interactive pair-programming and architectural assistant.
+The AI was highly effective in diagnosing distributed systems bugs, bridging multi-language syntax gaps, and refining the architectural flow.
+
+
+\subsection{Architectural Refactoring}\label{subsec:architectural-refactoring}
+
+Initially, the system suffered from a "Point-to-Point Anti-Pattern," where workers communicated state updates directly to the Spring Boot Gateway, bypassing the Erlang Orchestrator.
+This caused the Erlang internal registry to fall out of sync.
+Gemini assisted in designing a "Message-Driven" architecture, helping implement the \texttt{rabbitmq\_client:publish\_status/4} function in Erlang.
+This repositioned Erlang as the absolute single source of truth, receiving HTTP updates from workers and safely broadcasting AMQP updates to the cluster.
+
+
+\subsection{Debugging Erlang Compilation Issues}\label{subsec:debugging-erlang-compilation-issues}
+
+During the implementation of the dynamic load balancer in \texttt{router.erl}, the codebase encountered an "Include Explosion" and multiple "redefining module" compilation errors.
+The AI was used to analyze the compiler logs and identified that the entire source code of the worker pool was accidentally pasted into the \texttt{distriqueue.hrl} header file.
+The AI provided the correct pattern for Erlang header files (macros and record definitions only) and guided the successful separation of the \texttt{\#worker\{\}} record, allowing the codebase to compile.
+
+\subsection{Cross-Language Serialization (Jackson vs. JSX)}\label{subsec:cross-language-serialization-(jackson-vs.-jsx)}
+
+When passing complex nested JSON result structures from Python/Java workers back through Erlang and into Spring Boot, the system encountered several deserialization faults (e.g., \texttt{Cannot map null into type int}).
+Gemini aided in configuring Spring Boot's Jackson Deserialization features (relaxing primitive constraints) and assisted in writing safe \texttt{jsx:encode/1} logic in Erlang to gracefully handle undefined result maps.
+
+\subsection{Algorithm Design}\label{subsec:algorithm-design}
+
+The AI assisted in authoring the functional Erlang code required for the \texttt{least\_loaded} routing strategy, specifically structuring the \texttt{lists:foldl/3} logic to safely calculate capacity ratios while preventing division-by-zero errors.
+
 

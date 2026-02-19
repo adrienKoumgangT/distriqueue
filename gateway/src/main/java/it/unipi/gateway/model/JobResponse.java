@@ -41,13 +41,13 @@ public class JobResponse {
     private String errorMessage;
 
     @Schema(description = "Current retry count", example = "1")
-    private int retryCount;
+    private Integer retryCount;
 
     @Schema(description = "Maximum retry attempts", example = "3")
-    private int maxRetries;
+    private Integer maxRetries;
 
     @Schema(description = "Execution timeout in seconds", example = "300")
-    private int executionTimeout;
+    private Integer executionTimeout;
 
     @Schema(description = "Job creation timestamp")
     @JsonProperty("created_at")
@@ -69,7 +69,7 @@ public class JobResponse {
 
     @Schema(description = "Indicates if the webhook callback was successfully sent")
     @JsonProperty("callback_sent")
-    private boolean callbackSent;
+    private Boolean callbackSent;
 
     @Schema(description = "Queue time in milliseconds")
     @JsonProperty("queue_time_ms")
@@ -109,7 +109,7 @@ public class JobResponse {
                 .completedAt(job.getCompletedAt())
                 .metadata(job.getMetadata())
                 .parentJobId(job.getParentJobId())
-                .callbackSent(job.isCallbackSent())
+                .callbackSent(job.getCallbackSent())
                 .queueTimeMs(job.getQueueTime())
                 .executionTimeMs(job.getDuration())
                 .totalDurationMs(calculateTotalDuration(job))

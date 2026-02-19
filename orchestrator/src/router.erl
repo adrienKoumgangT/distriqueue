@@ -9,6 +9,8 @@
 -author("adrien koumgang tegantchouang").
 -behaviour(gen_server).
 
+-include("distriqueue.hrl").
+
 %% API
 -export([start_link/0,
   route_job/1,
@@ -18,13 +20,11 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
--include("distriqueue.hrl").
-
 -record(state, {
   worker_load = #{} :: map(),           % WorkerId -> Load
   worker_capacities = #{} :: map(),     % WorkerId -> Capacity
   queue_stats = #{} :: map(),           % Queue -> {Length, ProcessingRate}
-  routing_strategy = round_robin :: atom()
+  routing_strategy = least_loaded :: atom()
 }).
 
 %%% PUBLIC API %%%
@@ -42,7 +42,7 @@ get_queue_stats() ->
 
 %%% GEN_SERVER CALLBACKS %%%
 init([]) ->
-  {ok, #state{}}.
+  {ok, #state{routing_strategy = least_loaded}}.
 
 handle_call({assign_worker, Job}, _From, State) ->
   Type = case is_record(Job, job) of
@@ -123,9 +123,37 @@ select_worker(Type, _Priority, State) ->
     round_robin ->
       select_round_robin(State);
     least_loaded ->
-      select_least_loaded(State);
+      select_least_loaded_by_type(Type, State);
     type_based ->
       select_by_type(Type, State)
+  end.
+
+select_least_loaded_by_type(Type, _State) ->
+  %% Get all workers registered for this type from the pool
+  case dq_worker_pool:get_workers_by_type(Type) of
+    [] ->
+      lager:warning("No workers found for type ~p, falling back to default", [Type]),
+      <<"default_worker">>;
+    Workers ->
+      %% Find the worker with the lowest Load/Capacity ratio
+      {BestWorkerId, _BestRatio} = lists:foldl(
+        fun(W, {AccId, AccRatio}) ->
+          %% Calculate load ratio (current_load / capacity)
+          %% Ensure we don't divide by zero if capacity is weirdly 0
+          Cap = case W#worker.capacity of 0 -> 1; C -> C end,
+          Ratio = W#worker.current_load / Cap,
+
+          if Ratio < AccRatio -> {W#worker.id, Ratio};
+            true -> {AccId, AccRatio}
+          end
+        end,
+        {<<"none">>, 999999.0},
+        Workers),
+
+      case BestWorkerId of
+        <<"none">> -> <<"default_worker">>;
+        Id -> Id
+      end
   end.
 
 select_round_robin(State) ->
@@ -158,7 +186,6 @@ select_by_type(Type, State) ->
   case Type of
     <<"calculate">> -> <<"python_calc_worker">>;
     <<"transform">> -> <<"java_transform_worker">>;
-    <<"validate">> -> <<"go_validate_worker">>;
     _ -> select_least_loaded(State)
   end.
 

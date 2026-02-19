@@ -1,235 +1,200 @@
 # DistriQueue Orchestrator
 
-Distributed job scheduler orchestrator written in Erlang/OTP. It maintains job state, routes work to RabbitMQ queues, tracks worker health, and coordinates leader election with a Raft-style FSM.
+Erlang/OTP orchestrator for DistriQueue. It accepts jobs over HTTP, stores in-memory job state, routes jobs to RabbitMQ priority queues, tracks worker heartbeats, and exposes cluster/raft/metrics endpoints.
 
-## Features
-- Job registry with status tracking, worker assignment, and cancelation
-- Raft-style leader election for cluster coordination
-- Priority-based routing to RabbitMQ queues
-- HTTP API for cluster status and job management
-- Prometheus-style metrics exporter and JSON metrics endpoint
-- Worker pool management with heartbeat and load tracking
+## What It Does
+- Accepts job registration and status updates through HTTP.
+- Routes jobs to RabbitMQ queues by priority:
+  - `job.high` (priority >= 10)
+  - `job.medium` (priority >= 5)
+  - `job.low` (priority < 5)
+- Maintains job state in `job_registry`.
+- Tracks worker capacity/load via heartbeat updates.
+- Runs a Raft-style FSM for leader/candidate/follower state.
+- Exposes JSON metrics and a Prometheus metrics listener.
 
 ## Architecture
-- `distriqueue` application boots the supervision tree and starts the HTTP server
-- `raft_fsm` manages leader election and log replication state
-- `job_registry` stores job metadata and broadcasts updates between nodes
-- `router` maps job priority to queues and assigns workers
-- `rabbitmq_client` publishes jobs to RabbitMQ and consumes work
-- `health_monitor` collects local and remote node health
-- `metrics_exporter` serves Prometheus metrics on a separate port
+Main OTP application: `distriqueue`
+
+Core modules:
+- `distriqueue_sup`: supervisor tree.
+- `http_server`: HTTP API on `http_port` (default `8081`).
+- `job_registry`: in-memory job store and indexes.
+- `router`: priority routing + worker assignment.
+- `rabbitmq_client`: AMQP publishing/consuming and queue setup.
+- `dq_worker_pool`: worker registry and selection logic.
+- `raft_fsm`: Raft-like consensus state machine.
+- `health_monitor`: node/local health checks.
+- `metrics_exporter`: Prometheus-style metrics listener.
 
 ## Requirements
 - Erlang/OTP 26
-- rebar3
-- RabbitMQ 3.12+ accessible from the orchestrator nodes
+- `rebar3`
+- RabbitMQ reachable from orchestrator (`amqp://<host>:5672`)
 
-## Quickstart
-```sh
+## Local Run
+```bash
+rebar3 get-deps
 rebar3 compile
 rebar3 shell
 ```
 
-The HTTP API listens on port 8081 by default.
+Default API base URL:
+- `http://localhost:8081`
+
+Prometheus metrics listener (from current `config/sys.config`):
+- `http://localhost:9101/metrics`
 
 ## Configuration
-Default values live in `config/sys.config` and `config/vm.args`.
+Primary runtime config is in `config/sys.config`.
 
-Key settings:
-- `node_name` and `cookie` for Erlang distribution
-- `rabbitmq_host`, `rabbitmq_port`, `rabbitmq_username`, `rabbitmq_password`
-- `http_port` for the API server
-- `metrics_port` for the Prometheus exporter
-- `raft_peers` list of peer node names
+Current defaults in this repo:
+- `node_name`: `orchestrator@Adrien0`
+- `cookie`: `VANQLBWBSYTBKENFPEWC`
+- `rabbitmq_host`: `10.2.1.11`
+- `rabbitmq_port`: `5672`
+- `rabbitmq_username`: `admin`
+- `rabbitmq_password`: `admin`
+- `http_port`: `8081`
+- `metrics_port`: `9101`
+- `raft_peers`: `["orchestrator@Adrien1.local"]`
 
-Update `config/sys.config` for environment-specific values. Release builds read `config/vm.args` for node name and cookie.
+VM/distribution settings are in `config/vm.args` (node name, cookie, process limits, etc).
+
+## 2-VM Deployment (10.2.1.11 / 10.2.1.12)
+Use long node names with IP-based host parts on both machines.
+
+Recommended node identities:
+- VM1 (`10.2.1.11`): `orchestrator@10.2.1.11`
+- VM2 (`10.2.1.12`): `orchestrator@10.2.1.12`
+
+Use the same cookie on both VMs.
+
+`config/vm.args` on `10.2.1.11`:
+```bash
+-name orchestrator@10.2.1.11
+-setcookie VANQLBWBSYTBKENFPEWC
+```
+
+`config/vm.args` on `10.2.1.12`:
+```bash
+-name orchestrator@10.2.1.12
+-setcookie VANQLBWBSYTBKENFPEWC
+```
+
+`config/sys.config` on `10.2.1.11` (`distriqueue` section):
+```erlang
+{node_name, "orchestrator@10.2.1.11"},
+{raft_peers, ["orchestrator@10.2.1.12"]}
+```
+
+`config/sys.config` on `10.2.1.12` (`distriqueue` section):
+```erlang
+{node_name, "orchestrator@10.2.1.12"},
+{raft_peers, ["orchestrator@10.2.1.11"]}
+```
+
+Build and run on each VM:
+```bash
+rebar3 get-deps
+rebar3 compile
+rebar3 shell
+```
+
+Quick connectivity check from the Erlang shell:
+```erlang
+net_adm:ping('orchestrator@10.2.1.12').
+```
+Expected result: `pong` (and symmetric check from VM2 to VM1).
 
 ## HTTP API
-Base URL: `http://localhost:8081`
+Routes currently served by `src/http_server.erl`:
 
 - `GET /api/health`
 - `GET /api/cluster/status`
 - `POST /api/jobs/register`
 - `PUT /api/jobs/:id/status`
+- `POST /api/jobs/status` (job id can be in JSON body)
 - `POST /api/jobs/:id/cancel`
 - `GET /api/jobs`
 - `GET /api/raft/status`
-- `GET /api/metrics` (JSON)
+- `GET /api/metrics` (JSON snapshot)
+- `POST /api/workers/heartbeat`
 
-Example job registration:
-```sh
+### Example: Register Job
+```bash
 curl -X POST http://localhost:8081/api/jobs/register \
   -H "Content-Type: application/json" \
-  -d '{"id":"job-123","type":"calculate","priority":10,"payload":{"numbers":[1,2,3]}}'
+  -d '{
+    "id":"job-123",
+    "type":"calculate",
+    "priority":10,
+    "payload":{"numbers":[1,2,3]}
+  }'
 ```
 
-Update job status:
-```sh
+### Example: Update Job Status
+```bash
 curl -X PUT http://localhost:8081/api/jobs/job-123/status \
   -H "Content-Type: application/json" \
-  -d '{"status":"running","worker_id":"worker-001"}'
+  -d '{
+    "status":"completed",
+    "workerId":"worker-001",
+    "result":{"sum":6}
+  }'
 ```
 
-Cancel a job:
-```sh
-curl -X POST http://localhost:8081/api/jobs/job-123/cancel
-```
-
-List jobs:
-```sh
-curl http://localhost:8081/api/jobs
-```
-
-Cluster status:
-```sh
-curl http://localhost:8081/api/cluster/status
-```
-
-Raft status:
-```sh
-curl http://localhost:8081/api/raft/status
-```
-
-Health check:
-```sh
-curl http://localhost:8081/api/health
-```
-
-JSON metrics snapshot:
-```sh
-curl http://localhost:8081/api/metrics
-```
-
-## Minimal OpenAPI Spec
-```yaml
-openapi: 3.0.3
-info:
-  title: DistriQueue Orchestrator API
-  version: 1.0.0
-servers:
-  - url: http://localhost:8081
-paths:
-  /api/health:
-    get:
-      summary: Health check
-      responses:
-        "200":
-          description: OK
-  /api/cluster/status:
-    get:
-      summary: Cluster status
-      responses:
-        "200":
-          description: OK
-  /api/jobs/register:
-    post:
-      summary: Register a job
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/JobRegistration"
-      responses:
-        "202":
-          description: Accepted
-  /api/jobs/{id}/status:
-    put:
-      summary: Update job status
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/JobStatusUpdate"
-      responses:
-        "200":
-          description: Updated
-  /api/jobs/{id}/cancel:
-    post:
-      summary: Cancel job
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Cancelled
-  /api/jobs:
-    get:
-      summary: List jobs
-      responses:
-        "200":
-          description: OK
-  /api/raft/status:
-    get:
-      summary: Raft status
-      responses:
-        "200":
-          description: OK
-  /api/metrics:
-    get:
-      summary: Metrics snapshot (JSON)
-      responses:
-        "200":
-          description: OK
-components:
-  schemas:
-    JobRegistration:
-      type: object
-      required: [id, type]
-      properties:
-        id:
-          type: string
-        type:
-          type: string
-        priority:
-          type: integer
-          minimum: 1
-        payload:
-          type: object
-    JobStatusUpdate:
-      type: object
-      required: [status, worker_id]
-      properties:
-        status:
-          type: string
-          enum: [pending, running, completed, failed, cancelled]
-        worker_id:
-          type: string
+### Example: Worker Heartbeat
+```bash
+curl -X POST http://localhost:8081/api/workers/heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "worker_id":"worker-001",
+    "worker_type":"calculate",
+    "capacity":10,
+    "current_load":2
+  }'
 ```
 
 ## Metrics
-- Prometheus exporter: `http://localhost:9100/metrics`
-- Exporter health: `http://localhost:9100/health`
+Two metrics surfaces exist:
 
-The HTTP API also exposes a JSON metrics snapshot at `/api/metrics`.
+- API JSON snapshot:
+  - `GET /api/metrics` on API port (`8081` by default)
+- Prometheus endpoint:
+  - `GET /metrics` on `metrics_port` (`9101` in current config)
+  - `GET /health` on metrics port
+
+## RabbitMQ Topology
+Declared by `rabbitmq_client`:
+- Exchange: `jobs.exchange` (`direct`, durable)
+- Queues:
+  - `job.high` (`x-max-priority=10`)
+  - `job.medium` (`x-max-priority=5`)
+  - `job.low` (`x-max-priority=1`)
+
+Status publishing uses:
+- Exchange: `status.exchange`
+- Routing key: `status.update`
 
 ## Docker
 Build:
-```sh
+```bash
 docker build -f docker/Dockerfile -t distriqueue-orchestrator .
 ```
 
 Run:
-```sh
+```bash
 docker run --rm -p 8081:8081 -p 9100:9100 distriqueue-orchestrator
 ```
 
-## Release
-```sh
+Note: Dockerfile currently exposes `9100`, while `config/sys.config` sets metrics to `9101`. Keep these aligned for your target environment.
+
+## Release Build
+```bash
 rebar3 as prod tar
 _build/prod/rel/distriqueue/bin/distriqueue foreground
 ```
 
-## Notes
-- Ensure RabbitMQ is reachable and has permissions to create the `jobs.exchange` and `job.*` queues.
-- Cluster nodes must share the same cookie and be able to connect over the Erlang distribution ports.
+## Utility Script
+`build-orchestrator.sh` exists for local rebuilds, but it is aggressive (`pkill`, `_build` cleanup, lockfile removal). Review before using in shared/dev environments.

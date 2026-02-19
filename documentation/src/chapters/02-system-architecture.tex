@@ -1,41 +1,42 @@
 \chapter{System Architecture}\label{ch:system-architecture}
 
 
-\section{High-Level Architecture}\label{sec:high-level-architecture}
+\section{High-Level Architecture and Justification}\label{sec:high-level-architecture}
+
+To fulfill the course requirements regarding models, paradigms, and middleware, the system adopts a Message-Oriented Middleware (MOM) paradigm integrated with an Actor-model orchestrator.
+\begin{itemize}
+    \item \textbf{Erlang/OTP}: Chosen for its native implementation of the Actor model, asynchronous message passing, and "let it crash" philosophy, making it ideal for distributed fault-tolerant coordination.
+    \item \textbf{RabbitMQ}: Chosen to decouple the HTTP ingestion layer from the execution layer.
+    It handles the "communication" requirement by providing durable, asynchronous message queues with priority support.
+    \item \textbf{Java/Spring Boot}: Chosen for the API Gateway to satisfy the "Advanced Java topics for enterprise applications" requirement, leveraging robust REST controllers and Server-Sent Events (SSE).
+\end{itemize}
 
 \section{Data Flow}\label{sec:data-flow}
 
-Job Submission Flow:
+\textbf{Job Submission Flow:}
 \begin{enumerate}
-    \item Client submits job via REST API to API Gateway
-    \item API Gateway stores job in H2 database, publishers to RabbitMQ
-    \item RabbitMQ queues job based on priority (High/Medium/Low)
-    \item Erlang Orchestrator consumes job, assigns to worker via load balancing
-    \item Worker executes job, sends status updates via REST
-    \item API Gateway updates job status, notifies clients via SSE
+    \item Client submits a job via REST API to the Java Spring Boot API Gateway.
+    \item The Gateway persists the job and publishes it to RabbitMQ (\texttt{jobs.exchange}) with an AMQP priority (High/Medium/Low).
+    \item The Erlang Orchestrator consumes the job from RabbitMQ.
+    \item The Orchestrator's Router dynamically discovers the least-loaded, capable polyglot worker and assigns the task.
+    \item The Worker (Python/Java) executes the job and sends a status update via HTTP to the Erlang Orchestrator.
+    \item Erlang updates its internal Mnesia/Map state, replicates it via CRDTs, and broadcasts the status back to the Gateway via RabbitMQ (\texttt{status.exchange}).
+    \item The API Gateway receives the AMQP update and notifies clients via SSE.
 \end{enumerate}
 
-Failure Recovery Flow:
+\textbf{Failure Recovery Flow:}
 \begin{enumerate}
-    \item Leader orchestrator node fails
-    \item Remaining nodes detect failure via heartbeat timeout
-    \item Raft consensus elects new leader
-    \item New leader resumes job processing
-    \item Failed node rejoins cluster as follower
+    \item Leader orchestrator node fails.
+    [cite_start]\item Remaining nodes detect failure via heartbeat timeout[cite: 71, 72].
+    \item Raft consensus elects a new leader.
+    \item New leader resumes job processing and re-registers connected workers.
 \end{enumerate}
 
-\section{Component Responsabilities}\label{sec:component-responsabilities}
+\section{Component Responsibilities}\label{sec:component-responsabilities}
 
 \begin{itemize}
-    \item \textbf{Orchestrator} (Erlang/OTP): Leader election, job registry, worker coordination, health monitoring
-    \item \textbf{API Gateway} (Java/Spring Boot): REST API, job persistence, SSE streaming, rate limiting
-    \item \textbf{Message Broker} (RabbitMQ): Priority queuing, message persistence, dead letter handling
-    \item \textbf{Workers} (Python, Java): Job execution (calculation, transformation, validation)
-    \item \textbf{Load Balancer} (Nginx): Traffic distribution across APU gateways
-    \item \textbf{Database} (H2): Job metadata persistence
-    \item \textbf{Cache} (Redis): Session management, rate limiting
-    \item \textbf{Monitoring} (Prometheus/Grafana): Metrics collection and visualization
+    \item \textbf{Orchestrator (Erlang/OTP)}: Leader election, job registry, dynamic worker routing, load balancing, health monitoring[cite: 73].
+    \item \textbf{API Gateway (Java/Spring)}: REST API, SSE streaming, Jackson JSON serialization.
+    \item \textbf{Message Broker (RabbitMQ)}: Priority queuing, AMQP routing.
+    \item \textbf{Workers (Python, Java)}: Job execution (calculation, transformation, validation)[cite: 73].
 \end{itemize}
-
-
-

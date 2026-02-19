@@ -31,12 +31,12 @@ public class JobRequest {
     @Schema(description = "Maximum number of retries on failure", example = "3")
     @Builder.Default
     @Positive(message = "Maximum retries must be positive")
-    private int maxRetries = 3;
+    private Integer maxRetries = 3;
 
     @Positive(message = "Execution timeout must be positive")
     @Schema(description = "Execution timeout in seconds", example = "300")
     @Builder.Default
-    private int executionTimeout = 300; // 5 minutes default
+    private Integer executionTimeout = 300; // 5 minutes default
 
     @Schema(description = "Metadata for the job", example = "{\"userId\": \"123\", \"source\": \"web\"}")
     private Map<String, String> metadata;
