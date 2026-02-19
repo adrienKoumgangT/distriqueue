@@ -169,12 +169,12 @@ Call the API Gateway with a POST request to POST http://10.2.1.11:8080/api/jobs 
 
 ## Access Points
 
-- API Gateway: http://10.2.1.3:8080, http://10.2.1.4:8080
-- H2 Console: http://10.2.1.3:8082/h2-console (JDBC: jdbc:h2:file:/opt/distriqueue/data/h2/distriqueue)
-- RabbitMQ Management: http://10.2.1.3:15672 (admin/admin!)
-- Erlang Orchestrator API: http://10.2.1.3:8081/api/cluster/status
+- API Gateway: http://10.2.1.11:8080
+- H2 Console: http://10.2.1.11:8082/h2-console (JDBC: jdbc:h2:file:/opt/distriqueue/data/h2/distriqueue)
+- RabbitMQ Management: http://10.2.1.11:15672 (admin/admin!)
+- Erlang Orchestrator API: http://10.2.1.11:8081/api/cluster/status
 
 ## Monitoring
 
-- Node Exporter: http://10.2.1.3:9100/metrics
-- RabbitMQ Metrics: http://10.2.1.3:15692/metrics
+- Node Exporter: http://10.2.1.11:9100/metrics
+- RabbitMQ Metrics: http://10.2.1.11:15692/metrics
