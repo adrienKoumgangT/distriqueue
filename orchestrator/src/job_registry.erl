@@ -100,22 +100,7 @@ init([]) ->
   {ok, #state{}}.
 
 update_job_result(JobId, Status, WorkerId, Result) ->
-  gen_server:call(?MODULE, {update_job_result, JobId, Status, WorkerId, Result}).
-
-handle_call({update_job_result, JobId, Status, WorkerId, Result}, _From, State) ->
-  case get_job(JobId) of
-    {ok, Job} ->
-      UpdatedJob = Job#job{
-        status = Status,
-        worker_id = WorkerId,
-        result = Result,
-        completed_at = erlang:system_time(millisecond)
-      },
-      mnesia:dirty_write(jobs, UpdatedJob),
-      {reply, ok, State};
-    error ->
-      {reply, {error, not_found}, State}
-  end;
+  gen_server:cast(?MODULE, {update_job_result, JobId, Status, WorkerId, Result}).
 
 handle_call({register_job, JobMap}, _From, State) ->
   JobId = maps:get(id, JobMap, maps:get(<<"id">>, JobMap, <<"unknown_id">>)),
@@ -224,6 +209,9 @@ handle_cast({update_status, JobId, Status, WorkerId}, State) ->
       },
 
       broadcast_job_update(UpdatedJob),
+
+      rabbitmq_client:publish_status(JobId, Status, WorkerId, undefined),
+
       lager:info("Job ~p status changed from ~p to ~p, worker: ~p",
         [JobId, OldStatus, Status, WorkerId]),
 
@@ -281,6 +269,46 @@ handle_cast({sync_job, Job}, State) ->
   },
 
   {noreply, NewState};
+
+handle_cast({update_job_result, JobId, Status, WorkerId, Result}, State) ->
+  case maps:get(JobId, State#state.jobs, not_found) of
+    not_found ->
+      {noreply, State};
+    Job ->
+      OldStatus = Job#job.status,
+      OldWorkerId = Job#job.worker_id,
+      Now = erlang:system_time(millisecond),
+
+      %% Safely update the job record
+      UpdatedJob = Job#job{
+        status = Status,
+        worker_id = WorkerId,
+        result = Result,
+        completed_at = Now
+      },
+
+      %% Update the main jobs map
+      CurrentJobs = State#state.jobs,
+      NewJobs = CurrentJobs#{JobId => UpdatedJob},
+
+      %% Update the searchable indexes
+      NewByStatus = update_index(State#state.by_status, OldStatus, Status, JobId),
+      NewByWorker = update_worker_index(State#state.by_worker, OldWorkerId, WorkerId, JobId),
+
+      NewState = State#state{
+        jobs = NewJobs,
+        by_status = NewByStatus,
+        by_worker = NewByWorker
+      },
+
+      broadcast_job_update(UpdatedJob),
+
+      rabbitmq_client:publish_status(JobId, Status, WorkerId, Result),
+
+      lager:info("Job ~p completed! Result safely stored by worker: ~p", [JobId, WorkerId]),
+
+      {noreply, NewState}
+  end;
 
 handle_cast(_Msg, State) ->
   {noreply, State}.

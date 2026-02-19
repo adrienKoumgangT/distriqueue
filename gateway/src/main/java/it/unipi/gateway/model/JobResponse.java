@@ -67,6 +67,10 @@ public class JobResponse {
     @Schema(description = "Parent job ID for dependent jobs")
     private String parentJobId;
 
+    @Schema(description = "Indicates if the webhook callback was successfully sent")
+    @JsonProperty("callback_sent")
+    private boolean callbackSent;
+
     @Schema(description = "Queue time in milliseconds")
     @JsonProperty("queue_time_ms")
     private Long queueTimeMs;
@@ -105,6 +109,7 @@ public class JobResponse {
                 .completedAt(job.getCompletedAt())
                 .metadata(job.getMetadata())
                 .parentJobId(job.getParentJobId())
+                .callbackSent(job.isCallbackSent())
                 .queueTimeMs(job.getQueueTime())
                 .executionTimeMs(job.getDuration())
                 .totalDurationMs(calculateTotalDuration(job))

@@ -3,7 +3,9 @@ package it.unipi.javaworker.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import it.unipi.javaworker.util.PriorityDeserializer;
 import lombok.*;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.util.Map;
 
@@ -17,6 +19,7 @@ public class Job {
 
     private String id;
     private String type;
+    @JsonDeserialize(using = PriorityDeserializer.class)
     private Integer priority;
     private String status;
 

@@ -16,7 +16,8 @@
   publish_job/2,
   cancel_job/1,
   consume_jobs/1,
-  get_queue_info/1]).
+  get_queue_info/1,
+  publish_status/4]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -41,6 +42,9 @@ cancel_job(JobId) ->
 
 consume_jobs(Queue) ->
   gen_server:cast(?MODULE, {consume_jobs, Queue, self()}).
+
+publish_status(JobId, Status, WorkerId, Result) ->
+  gen_server:cast(?MODULE, {publish_status, JobId, Status, WorkerId, Result}).
 
 get_queue_info(Queue) ->
   gen_server:call(?MODULE, {get_queue_info, Queue}).
@@ -113,6 +117,43 @@ handle_call(_Request, _From, State) ->
 handle_cast({cancel_job, JobId}, State) ->
   lager:info("Job cancellation requested for ~p", [JobId]),
   {noreply, State};
+
+handle_cast({publish_status, JobId, Status, WorkerId, Result}, State) ->
+  try
+    %% 1. Format the status safely to uppercase binary (e.g., <<"COMPLETED">>)
+    UpperStatus = string:uppercase(atom_to_binary(Status, utf8)),
+
+    %% 2. Build the exact JSON payload the Gateway expects
+    Payload0 = #{
+      <<"jobId">> => JobId,
+      <<"jobStatus">> => UpperStatus,
+      <<"workerId">> => WorkerId
+    },
+
+    %% 3. Safely attach the mathematical result if it exists
+    Payload = case Result of
+                undefined -> Payload0;
+                _ -> Payload0#{<<"result">> => Result}
+              end,
+
+    JsonBinary = jsx:encode(Payload),
+
+    %% 4. Define properties and publish
+    Props = #'P_basic'{content_type = <<"application/json">>},
+    BasicPublish = #'basic.publish'{
+      exchange = <<"status.exchange">>,
+      routing_key = <<"status.update">>
+    },
+
+    amqp_channel:cast(State#state.channel, BasicPublish, #amqp_msg{props = Props, payload = JsonBinary}),
+    lager:info("✅ Status ~p published to Gateway for job ~p", [UpperStatus, JobId]),
+
+    {noreply, State}
+  catch
+    Error:Reason ->
+      lager:error("Failed to publish status to RabbitMQ: ~p:~p", [Error, Reason]),
+      {noreply, State}
+  end;
 
 handle_cast({consume_jobs, Queue, ConsumerPid}, State) ->
   Tag = erlang:binary_to_atom(Queue, utf8),

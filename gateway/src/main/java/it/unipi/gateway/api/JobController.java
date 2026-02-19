@@ -38,7 +38,11 @@ public class JobController {
             @Valid @RequestBody JobRequest request
     ) {
         request.validate();
+
         Job job = jobService.createJob(request);
+
+        jobService.submitJob(job);
+
         JobResponse response = JobResponse.fromEntity(job);
 
         return ResponseEntity

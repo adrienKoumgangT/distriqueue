@@ -18,24 +18,8 @@
 %% Gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
-%% Define the job record used for parsing jobs into JSON
--record(job, {
-  id,
-  type,
-  priority,
-  status,
-  worker_id,
-  payload,
-  result,
-  error,
-  retries,
-  max_retries,
-  timeout,
-  created_at,
-  started_at,
-  completed_at,
-  metadata
-}).
+%% Use the shared header instead of redefining the record
+-include("distriqueue.hrl").
 
 -record(state, {
   port = 8081,
@@ -56,7 +40,7 @@ stop() ->
 %%% GEN_SERVER CALLBACKS %%%
 init([]) ->
   Port = application:get_env(distriqueue, http_port, 8081),
-  {ok, #state{port = Port}, 0}. % Timeout 0 to start immediately
+  {ok, #state{port = Port}, 0}.
 
 handle_call(stop, _From, State) ->
   cowboy:stop_listener(State#state.listener),
@@ -104,7 +88,6 @@ init(Req, cluster_status) ->
   {ok, handle_cluster_status(Req), cluster_status};
 
 init(Req, register_job) ->
-  %% handle_register_job calls cowboy_req:reply, so we return the Req
   {ok, handle_register_job(Req), register_job};
 
 init(Req, update_job_status) ->
@@ -159,7 +142,6 @@ handle_register_job(Req) ->
   {ok, Body, Req1} = cowboy_req:read_body(Req),
 
   try
-    %% FIX: Modern JSX returns maps automatically.
     Job = jsx:decode(Body, [return_maps]),
 
     case distriqueue:register_job(Job) of
@@ -172,7 +154,6 @@ handle_register_job(Req) ->
           #{<<"content-type">> => <<"application/json">>},
           Response, Req1);
       Error ->
-        %% Safely format the error in case it's a tuple like {error, Reason}
         ErrorMsg = list_to_binary(io_lib:format("~p", [Error])),
         Response = jsx:encode(#{
           <<"status">> => <<"error">>,
@@ -195,17 +176,17 @@ handle_update_job_status(Req) ->
     Map = jsx:decode(Body, [return_maps]),
 
     JobId = case cowboy_req:binding(id, Req1) of
-              undefined -> maps:get(<<"jobId">>, Map, <<"unknown">>);
+              undefined -> maps:get(<<"jobId">>, Map, maps:get(<<"id">>, Map, <<"unknown">>));
               Id -> Id
             end,
 
     StatusBin = maps:get(<<"status">>, Map, <<"pending">>),
-    WorkerId = maps:get(<<"workerId">>, Map, <<"unknown">>),
+    %% Safely fallback for both camelCase (Java) and snake_case (Python)
+    WorkerId = maps:get(<<"workerId">>, Map, maps:get(<<"worker_id">>, Map, <<"unknown">>)),
     ResultMap = maps:get(<<"result">>, Map, undefined),
 
     StatusAtom = erlang:binary_to_atom(StatusBin, utf8),
 
-    %% Update status AND result in the registry
     job_registry:update_job_result(JobId, StatusAtom, WorkerId, ResultMap),
 
     cowboy_req:reply(200,
@@ -223,11 +204,10 @@ handle_worker_heartbeat(Req) ->
   {ok, Body, Req1} = cowboy_req:read_body(Req),
   try
     Map = jsx:decode(Body, [return_maps]),
-    WorkerId = maps:get(<<"worker_id">>, Map, <<"unknown">>),
+    WorkerId = maps:get(<<"workerId">>, Map, maps:get(<<"worker_id">>, Map, <<"unknown">>)),
     Capacity = maps:get(<<"capacity">>, Map, 10),
-    CurrentLoad = maps:get(<<"current_load">>, Map, 0),
+    CurrentLoad = maps:get(<<"currentLoad">>, Map, maps:get(<<"current_load">>, Map, 0)),
 
-    %% Send the heartbeat stats to the Router to aid in load balancing
     gen_server:cast(router, {worker_heartbeat, WorkerId, Capacity, CurrentLoad}),
 
     cowboy_req:reply(200,
@@ -260,7 +240,7 @@ handle_list_jobs(Req) ->
         <<"status">> => Job#job.status,
         <<"priority">> => Job#job.priority,
         <<"worker_id">> => Job#job.worker_id,
-        <<"result">> => Job#job.result,   %% <-- ADD THIS LINE
+        <<"result">> => case Job#job.result of undefined -> null; Res -> Res end,
         <<"created_at">> => Job#job.created_at,
         <<"started_at">> => Job#job.started_at,
         <<"completed_at">> => Job#job.completed_at
@@ -272,7 +252,9 @@ handle_list_jobs(Req) ->
     <<"count">> => length(Jobs)
   }),
 
-  cowboy_req:reply(200, #{<<"content-type">> => <<"application/json">>}, Response, Req).
+  cowboy_req:reply(200,
+    #{<<"content-type">> => <<"application/json">>},
+    Response, Req).
 
 handle_raft_status(Req) ->
   case raft_fsm:get_state() of
@@ -299,7 +281,6 @@ handle_raft_status(Req) ->
     jsx:encode(Status), Req).
 
 handle_metrics(Req) ->
-  % Get job statistics
   {ok, Jobs} = job_registry:get_all_jobs(),
 
   Stats = lists:foldl(
@@ -309,7 +290,6 @@ handle_metrics(Req) ->
       Acc#{Status => Count + 1}
     end, #{}, Jobs),
 
-  % Get queue statistics
   {ok, QueueStats} = router:get_queue_stats(),
 
   Response = jsx:encode(#{

@@ -1,6 +1,8 @@
 package it.unipi.gateway.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -17,6 +19,7 @@ import java.util.Map;
 public class JobStatusUpdate {
 
     @NotBlank(message = "Job ID is required")
+    @JsonAlias({"job_id", "jobId"})
     @Schema(description = "Job ID", example = "550e8400-e29b-41d4-a716-446655440000")
     private String jobId;
 
@@ -24,7 +27,23 @@ public class JobStatusUpdate {
     @Schema(description = "New job status", example = "COMPLETED")
     private JobStatus jobStatus;
 
+    // Safely parse lowercase strings like "completed" from Erlang into the COMPLETED Enum
+    @JsonSetter("status")
+    public void setStatusString(String status) {
+        if (status != null) {
+            this.jobStatus = JobStatus.valueOf(status.toUpperCase());
+        }
+    }
+
+    @JsonSetter("jobStatus")
+    public void setJobStatusString(String status) {
+        if (status != null) {
+            this.jobStatus = JobStatus.valueOf(status.toUpperCase());
+        }
+    }
+
     @NotBlank(message = "Worker ID is required")
+    @JsonAlias({"worker_id", "workerId"}) // Accept Erlang or Java style
     @Schema(description = "Worker ID reporting the status", example = "worker-python-001")
     private String workerId;
 
@@ -32,6 +51,7 @@ public class JobStatusUpdate {
     private Map<String, Object> result;
 
     @Schema(description = "Error message if job failed")
+    @JsonAlias({"error_message", "errorMessage"})
     private String errorMessage;
 
     @Schema(description = "Progress percentage (0-100)", example = "75")
@@ -44,9 +64,11 @@ public class JobStatusUpdate {
     private String timestamp;
 
     @Schema(description = "Execution time in milliseconds")
+    @JsonAlias({"execution_time_ms", "executionTimeMs"})
     private Long executionTimeMs;
 
     @Schema(description = "Memory usage in MB")
+    @JsonAlias({"memory_usage_mb", "memoryUsageMb"})
     private Long memoryUsageMb;
 
     public void validate() {

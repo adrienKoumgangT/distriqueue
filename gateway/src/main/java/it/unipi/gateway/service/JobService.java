@@ -108,6 +108,12 @@ public class JobService {
         job.setStatus(JobStatus.QUEUED);
         job = jobRepository.save(job);
 
+        Job finalJob = job;
+        erlangClient.registerJob(job).subscribe(
+                res -> log.debug("Job {} registered with Erlang: {}", finalJob.getId(), res),
+                err -> log.error("Failed to register job {} with Erlang: {}", finalJob.getId(), err.getMessage())
+        );
+
         String routingKey = getRoutingKey(job.getPriority());
         rabbitTemplate.convertAndSend(jobsExchange, routingKey, job);
 

@@ -92,9 +92,8 @@ public interface JobRepository extends JpaRepository<Job, String> {
             WHERE (:type IS NULL OR j.type = :type)
                 AND (:priority IS NULL OR j.priority = :priority)
                 AND (:status IS NULL OR j.status = :status)
-                AND (:createdFrom IS NULL OR j.createdAt >= :createdFrom)
-                AND (:createdTo IS NULL OR j.createdAt <= :createdTo)
-                AND (:tags IS NULL OR j.tags LIKE %:tags%)
+                AND (cast(:createdFrom as timestamp) IS NULL OR j.createdAt >= :createdFrom)
+                AND (cast(:createdTo as timestamp) IS NULL OR j.createdAt <= :createdTo)
             """)
     Page<Job> findWithFilters(
             @Param("type") String type,
@@ -112,14 +111,14 @@ public interface JobRepository extends JpaRepository<Job, String> {
            AND (:priority IS NULL OR j.priority = :priority)
            AND (:status IS NULL OR j.status = :status)
            AND (:workerId IS NULL OR j.workerId = :workerId)
-           AND (:createdFrom IS NULL OR j.createdAt >= :createdFrom)
-           AND (:createdTo IS NULL OR j.createdAt <= :createdTo)
-           AND (:startedFrom IS NULL OR j.startedAt >= :startedFrom)
-           AND (:startedTo IS NULL OR j.startedAt <= :startedTo)
-           AND (:completedFrom IS NULL OR j.completedAt >= :completedFrom)
-           AND (:completedTo IS NULL OR j.completedAt <= :completedTo)
+           AND (cast(:createdFrom as timestamp) IS NULL OR j.createdAt >= :createdFrom)
+           AND (cast(:createdTo as timestamp) IS NULL OR j.createdAt <= :createdTo)
+           AND (cast(:startedFrom as timestamp) IS NULL OR j.startedAt >= :startedFrom)
+           AND (cast(:startedTo as timestamp) IS NULL OR j.startedAt <= :startedTo)
+           AND (cast(:completedFrom as timestamp) IS NULL OR j.completedAt >= :completedFrom)
+           AND (cast(:completedTo as timestamp) IS NULL OR j.completedAt <= :completedTo)
            """)
-    Page<Job> findWithFilters(
+    Page<Job> findWithAdvancedFilters(
             @Param("type") String type,
             @Param("priority") JobPriority jobPriority,
             @Param("status") JobStatus jobStatus,
@@ -163,21 +162,21 @@ public interface JobRepository extends JpaRepository<Job, String> {
 
     /// Average execution time
     @Query(value ="""
-            SELECT AVG(TIMESTAMPDIFF(MILLISECOND, j.startedAt, j.completedAt))
-            FROM Job j
+            SELECT AVG(TIMESTAMPDIFF(MILLISECOND, j.started_at, j.completed_at))
+            FROM jobs j
             WHERE j.status = 'COMPLETED'
-                AND j.startedAt IS NOT NULL
-                AND j.completedAt IS NOT NULL
+                AND j.started_at IS NOT NULL
+                AND j.completed_at IS NOT NULL
             """, nativeQuery = true)
     Double getAverageExecutionTimeMs();
 
     /// Average queue time
     @Query(value ="""
-            SELECT AVG(TIMESTAMPDIFF(MILLISECOND, j.createdAt, j.startedAt))
-            FROM Job j
+            SELECT AVG(TIMESTAMPDIFF(MILLISECOND, j.created_at, j.started_at))
+            FROM jobs j
             WHERE j.status IN ('COMPLETED', 'FAILED', 'TIMEOUT')
-                AND j.createdAt IS NOT NULL
-                AND j.startedAt IS NOT NULL
+                AND j.created_at IS NOT NULL
+                AND j.started_at IS NOT NULL
             """, nativeQuery = true)
     Double getAverageQueueTimeMs();
 
@@ -191,7 +190,6 @@ public interface JobRepository extends JpaRepository<Job, String> {
             """)
     List<Object[]> getSuccessRateByType();
 
-    /// Hourly throughput
     @Query("""
             SELECT FUNCTION('HOUR', j.completedAt), COUNT(j)
             FROM Job j
@@ -256,14 +254,5 @@ public interface JobRepository extends JpaRepository<Job, String> {
             LIMIT 1
             """)
     Optional<Job> findOldestPendingJob();
-
-    /// Find jobs by execution timeout (jobs that have exceeded their timeout)
-    @Query("""
-            SELECT j
-            FROM Job j
-            WHERE j.status = 'RUNNING'
-                AND TIMESTAMPDIFF(SECOND, j.startedAt, CURRENT_TIMESTAMP) > j.executionTimeout
-            """)
-    List<Job> findJobsExceedingTimeout();
 
 }

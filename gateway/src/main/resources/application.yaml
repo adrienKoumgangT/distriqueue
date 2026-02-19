@@ -1,11 +1,8 @@
-# application.yml
 spring:
   application:
-    name: gateway
+    name: distriqueue-api-gateway
   
   rabbitmq:
-    # host: ${RABBITMQ_HOST:rabbitmq1}
-    # port: ${RABBITMQ_PORT:5672}
     addresses: ${RABBITMQ_ADDRESSES:10.2.1.11:5672,10.2.1.12:5672}
     username: ${RABBITMQ_USERNAME:admin}
     password: ${RABBITMQ_PASSWORD:admin}
@@ -49,25 +46,25 @@ spring:
       enabled: true
       path: /h2-console
       settings:
-        web-allow-others: true # Allows access from outside localhost
+        web-allow-others: true
 
   jackson:
     serialization:
-      write-dates-as-timestamps: false
       indent-output: true
     deserialization:
       fail-on-unknown-properties: false
     time-zone: UTC
+
   data:
     redis:
       host: ${REDIS_HOST:10.2.1.11}
       port: ${REDIS_PORT:6379}
-      # database: 0
       lettuce:
         pool:
           max-active: 8
           max-idle: 8
           min-idle: 2
+
   web:
     error:
       include-message: always
@@ -76,16 +73,20 @@ spring:
       include-exception: false
 
 server:
-  port: ${SERVER_PORT:8080}
+  # MOVED FROM 8080 to 8082
+  port: ${SERVER_PORT:8082}
   servlet:
     context-path: /api
 
 distriqueue:
   erlang:
-    nodes: ${ERLANG_NODES:orchestrator@Adrien0,orchestrator@Adrien1}
+    # Fixed IPs to prevent UnknownHostExceptions
+    nodes: ${ERLANG_NODES:orchestrator@10.2.1.11,orchestrator@10.2.1.12}
     rest:
       port: ${ERLANG_REST_PORT:8081}
     cookie: ${ERLANG_COOKIE:VANQLBWBSYTBKENFPEWC}
+    # Enforce HTTP mode for reliable REST communication
+    mode: http
   
   job:
     default-timeout: ${JOB_DEFAULT_TIMEOUT:300}
@@ -115,7 +116,7 @@ distriqueue:
 # Logging Configuration
 logging:
   level:
-    com.distriqueue: DEBUG
+    it.unipi.gateway: DEBUG
     org.springframework.amqp: INFO
     org.springframework.web: INFO
   pattern:
@@ -136,15 +137,9 @@ management:
   endpoint:
     health:
       show-details: always
-  metrics:
-    export:
-      prometheus:
-        enabled: true
 
 # OpenAPI/Swagger Configuration
 springdoc:
-  api-docs:
-    path: /api-docs
   swagger-ui:
     path: /swagger-ui.html
     operations-sorter: method

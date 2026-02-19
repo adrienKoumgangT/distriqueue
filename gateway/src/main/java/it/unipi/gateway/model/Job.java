@@ -124,6 +124,11 @@ public class Job implements Serializable {
     @Schema(description = "Callback URL for job completion notifications")
     private String callbackUrl;
 
+    @Column(name = "callback_sent")
+    @Builder.Default
+    @Schema(description = "Indicates if the webhook callback was successfully sent")
+    private boolean callbackSent = false;
+
     @Column(name = "tags", length = 500)
     @Schema(description = "Comma-separated job tags")
     private String tags;
