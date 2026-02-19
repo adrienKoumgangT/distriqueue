@@ -79,7 +79,7 @@ export ORCHESTRATOR_URL="http://10.2.1.11:8081"
 # for vm2 (10.2.1.12): export ORCHESTRATOR_URL="http://10.2.1.12:8081"
 
 export STATUS_UPDATE_URL="http://10.2.1.11:8081/api/jobs/status"
-# for vm2(10.2.1.12): export STATUS_UPDATE_URL="http://10.2.1.11:8082/api/jobs/status"
+# for vm2(10.2.1.12): export STATUS_UPDATE_URL="http://10.2.1.12:8081/api/jobs/status"
 
 python worker.py
 ```
@@ -122,6 +122,7 @@ nohup java -jar target/java-worker-0.0.1-SNAPSHOT.jar > worker.log 2>&1 &
 # To see the live logs anytime:
 tail -f worker.log
 
+# to kill the worker:
 kill -9 $(pgrep -f "java -jar target/java-worker-0.0.1-SNAPSHOT.jar")
 # or
 pkill -f "java -jar target/java-worker-0.0.1-SNAPSHOT.jar"
@@ -135,6 +136,21 @@ mvn clean package -DskipTests
 
 java -jar target/gateway-0.0.1-SNAPSHOT.jar
 ```
+
+To launch this gateway in the background:
+```bash
+nohup java -jar target/gateway-0.0.1-SNAPSHOT.jar > gateway.log 2>&1 &
+
+# To see the live logs anytime:
+tail -f gateway.log
+
+# to kill the gateway:
+kill -9 $(pgrep -f "java -jar target/gateway-0.0.1-SNAPSHOT.jar")
+# or
+pkill -f "java -jar target/gateway-0.0.1-SNAPSHOT.jar"
+```
+
+The swagger ui is available at http://10.2.1.11:8080/swagger-ui/index.html
 
 **To test the system**:
 Call the API Gateway with a POST request to POST http://10.2.1.11:8080/api/jobs with the following body:
