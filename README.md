@@ -37,81 +37,8 @@ For component-based local development:
 - RabbitMQ 3.13+
 - Redis 7+
 
-For containerized workflows:
-- Docker + Docker Compose
 
-## Quick Start (Component-Based, Recommended)
-
-This path matches the current checked-in service folders and configs.
-
-### 1. Start RabbitMQ and Redis
-
-```bash
-docker run -d --name dq-rabbitmq \
-  -p 5672:5672 -p 15672:15672 \
-  rabbitmq:3.13-management-alpine
-
-docker run -d --name dq-redis \
-  -p 6379:6379 \
-  redis:7.2-alpine
-```
-
-### 2. Start the orchestrator
-
-```bash
-cd orchestrator
-rebar3 get-deps
-rebar3 compile
-rebar3 shell
-```
-
-Default orchestrator API: `http://localhost:8081`
-
-### 3. Start the gateway
-
-In a new terminal:
-
-```bash
-cd gateway
-ERLANG_NODES=orchestrator@localhost \
-ERLANG_REST_PORT=8081 \
-RABBITMQ_ADDRESSES=localhost:5672 \
-REDIS_HOST=localhost \
-SERVER_PORT=8082 \
-./mvnw spring-boot:run
-```
-
-Gateway base URL: `http://localhost:8082/api`
-
-### 4. Start workers
-
-Python worker (new terminal):
-
-```bash
-cd workers/python-worker
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-RABBITMQ_HOST=localhost \
-RABBITMQ_PORT=5672 \
-RABBITMQ_USERNAME=admin \
-RABBITMQ_PASSWORD=admin \
-ORCHESTRATOR_URL=http://localhost:8081 \
-STATUS_UPDATE_URL=http://localhost:8081/api/jobs/status \
-python worker.py
-```
-
-Java worker (new terminal):
-
-```bash
-cd workers/java-worker
-RABBITMQ_ADDRESSES=localhost:5672 \
-RABBITMQ_USERNAME=admin \
-RABBITMQ_PASSWORD=admin \
-STATUS_UPDATE_URL=http://localhost:8081/api/jobs/status \
-./mvnw spring-boot:run
-```
+For deployment in vms, see `DEPLOYMENT.md`.
 
 ## API Usage
 
@@ -171,45 +98,6 @@ curl http://localhost:8082/api/jobs/stream
 - `POST /api/workers/heartbeat`
 
 Base URL (local): `http://localhost:8081`
-
-## Build Commands
-
-Gateway:
-
-```bash
-cd gateway
-./mvnw clean package
-```
-
-Java worker:
-
-```bash
-cd workers/java-worker
-./mvnw clean package
-```
-
-Orchestrator:
-
-```bash
-cd orchestrator
-rebar3 compile
-rebar3 release
-```
-
-## Deployment Material in This Repo
-
-- VM packaging/build flow: `deploy/scripts/build.sh`
-- VM deploy scripts: `deploy/scripts/deploy-vm1.sh`, `deploy/scripts/deploy-vm2.sh`
-- Deployment checklist: `DEPLOYMENT.md`
-
-## Current Inconsistencies to Be Aware Of
-
-The repository contains some mixed-generation assets; if you use them as-is, expect manual fixes:
-
-- `docker-compose.yml` points API gateway build context to `./client-api`, but this repo contains `gateway/`.
-- `docker-compose.yml` mounts `./config/prometheus/...` and `./config/grafana/...`, while tracked monitoring config is under `monitoring/prometheus.yml`.
-- Some scripts/docs still use `/api/v1/...` routes, while the current gateway controller maps `/api/jobs...`.
-- VM docs/scripts reference both `10.2.1.3/10.2.1.4` and `10.2.1.11/10.2.1.12` topologies.
 
 ## Service-Specific Docs
 
