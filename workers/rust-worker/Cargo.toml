@@ -1,0 +1,19 @@
+[package]
+name = "rust-worker"
+version = "0.1.0"
+edition = "2024"
+
+
+[dependencies]
+tokio = { version = "1.32", features = ["full"] }
+lapin = "2.3" # RabbitMQ client
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json"] }
+uuid = { version = "1.4", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+env_logger = "0.10"
+futures-lite = "1.13"
+async-trait = "0.1.89"
+

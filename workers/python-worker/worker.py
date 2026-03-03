@@ -1,19 +1,16 @@
-#!/usr/bin/env python3
-
 import pika
+from pika.exceptions import ConnectionClosedByBroker, AMQPConnectionError
 import json
 import time
 import uuid
 import threading
 import logging
 import requests
-import socket
 import signal
 import sys
 import os
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
-from queue import Queue
 from concurrent.futures import ThreadPoolExecutor, Future
 import traceback
 
@@ -110,7 +107,7 @@ class TransformationJobHandler(JobHandler):
         operation = payload.get('operation', 'uppercase')
         data = payload.get('data', {})
 
-        result = {}
+        result: Dict[str, Any] = {}
         start_time = time.time()
 
         if operation == 'uppercase':
@@ -181,7 +178,7 @@ class ValidationJobHandler(JobHandler):
         value = payload.get('value', '')
 
         import re
-        result = {}
+        result: Dict[str, Any] = {}
         start_time = time.time()
 
         if validation_type == 'email':
@@ -195,7 +192,7 @@ class ValidationJobHandler(JobHandler):
         elif validation_type == 'phone':
             # Simple phone validation
             pattern = r'^\+?[1-9]\d{1,14}$'
-            is_valid = bool(re.match(pattern, re.sub(r'[\s\-\(\)]', '', str(value))))
+            is_valid = bool(re.match(pattern, re.sub(r'[\s\-()]', '', str(value))))
             result = {
                 'valid': is_valid,
                 'type': 'phone',
@@ -282,7 +279,7 @@ class PythonWorker:
     """Enhanced Python Worker for DistriQueue"""
 
     def __init__(self,
-                 rabbitmq_host: str = 'rabbitmq1',
+                 rabbitmq_host: str = 'rabbitmq',
                  rabbitmq_port: int = 5672,
                  rabbitmq_user: str = 'admin',
                  rabbitmq_pass: str = 'admin',
@@ -330,10 +327,14 @@ class PythonWorker:
             ValidationJobHandler()
         ]
 
-        # Threading
+        # Threading & Concurrency Control
         self.executor = ThreadPoolExecutor(max_workers=capacity)
+        # BoundedSemaphore strictly limits how many tasks can run at once
+        self.capacity_semaphore = threading.BoundedSemaphore(capacity)
+
         self.heartbeat_thread = None
         self.metrics_thread = None
+        self.worker_thread = None  # Thread for our custom polling loop
         self.futures: Dict[str, Future] = {}
 
         # Metrics
@@ -414,12 +415,19 @@ class PythonWorker:
                 return handler
         return None
 
-    def process_job(self, ch, method, properties, body) -> None:
+    def process_job(self, body) -> None:
         """Process a job from the queue"""
         job_start_time = time.time()
 
         try:
             job = json.loads(body)
+        except Exception as e:
+            logger.error(f"Failed to load job: {e}\n{traceback.format_exc()}")
+            self.failed_jobs += 1
+            self.current_load -= 1
+            return
+
+        try:
             job_id = job.get('id')
             job_type = job.get('type', 'default')
 
@@ -458,7 +466,7 @@ class PythonWorker:
                 self.successful_jobs += 1
 
             # Acknowledge message
-            ch.basic_ack(delivery_tag=method.delivery_tag)
+            # ch.basic_ack(delivery_tag=method.delivery_tag)
 
             # Update metrics
             self.total_jobs_processed += 1
@@ -484,11 +492,11 @@ class PythonWorker:
             if retry_count < max_retries:
                 # Increment retry count and requeue
                 job['retry_count'] = retry_count + 1
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+                # ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
                 logger.info(f"[{job_id}] Requeued for retry ({retry_count + 1}/{max_retries})")
             else:
                 # Max retries exceeded, send to dead letter
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                # ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
                 logger.error(f"[{job_id}] Max retries ({max_retries}) exceeded")
 
         finally:
@@ -510,7 +518,7 @@ class PythonWorker:
                            progress: Optional[int] = None) -> bool:
         """Send job status update to orchestrator/API"""
         try:
-            status_update = {
+            status_update: Dict[str, Any] = {
                 'jobId': job_id,
                 'status': status,
                 'workerId': self.worker_id,
@@ -604,20 +612,12 @@ class PythonWorker:
                 time.sleep(1)
 
     def start_consuming(self) -> None:
-        """Start consuming jobs from queues"""
-        # Set QoS to control prefetch count
-        self.channel.basic_qos(prefetch_count=1)
-
-        # Consume from all queues
-        for queue_name in self.queues.values():
-            self.channel.basic_consume(
-                queue=queue_name,
-                on_message_callback=self.process_job,
-                consumer_tag=f"{self.worker_id}-{queue_name}"
-            )
+        """Start consuming jobs using a strict priority polling loop"""
+        # We don't use basic_consume anymore. We use basic_get in a custom loop.
+        self.channel.basic_qos(prefetch_count=self.capacity)
 
         self.running = True
-        logger.info(f"Worker {self.worker_id} started consuming from queues")
+        logger.info(f"Worker {self.worker_id} starting strict priority loop")
 
         # Start heartbeat thread
         self.heartbeat_thread = threading.Thread(target=self.heartbeat_loop, daemon=True)
@@ -627,16 +627,85 @@ class PythonWorker:
         self.metrics_thread = threading.Thread(target=self.metrics_loop, daemon=True)
         self.metrics_thread.start()
 
+        # Start the strict priority polling loop
+        self.worker_thread = threading.Thread(target=self._priority_polling_loop, daemon=True)
+        self.worker_thread.start()
+
         # Register signal handlers
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
         try:
-            self.channel.start_consuming()
-        except Exception as e:
-            logger.error(f"Consumer error: {e}")
+            # Keep main thread alive to catch signals
+            while self.running:
+                time.sleep(1)
         finally:
             self.stop()
+
+    def _priority_polling_loop(self) -> None:
+        """Continuously poll queues in strict priority order (High -> Medium -> Low)"""
+        # Ordered list of queues
+        priority_order = [self.queues['high'], self.queues['medium'], self.queues['low']]
+
+        while self.running:
+            try:
+                # 1. Wait until we have capacity (semaphore ticket)
+                self.capacity_semaphore.acquire()
+
+                message_found = False
+
+                # 2. Check queues strictly from high to low
+                for queue_name in priority_order:
+                    method_frame, header_frame, body = self.channel.basic_get(queue=queue_name)
+
+                    if method_frame:
+                        message_found = True
+                        logger.debug(f"Pulled message from {queue_name}")
+
+                        # Offload to ThreadPool so the loop can fetch the next message!
+                        self.executor.submit(
+                            self._execute_job_concurrently,
+                            method_frame.delivery_tag,
+                            body
+                        )
+                        # We found a message (high priority), break out of the loop
+                        # so we don't accidentally pull a lower priority one right now!
+                        break
+
+                if not message_found:
+                    # If all queues are empty, return the ticket and wait a fraction of a second
+                    self.capacity_semaphore.release()
+                    time.sleep(0.1)
+
+            except (ConnectionClosedByBroker, AMQPConnectionError) as e:
+                logger.error(f"RabbitMQ connection error: {e}")
+                break
+            except Exception as e:
+                logger.error(f"Error in polling loop: {e}")
+                time.sleep(1)
+
+    def _execute_job_concurrently(self, delivery_tag: int, body: bytes) -> None:
+        """Executes the job in a background thread and safely acks it"""
+        try:
+            # Call your existing process_job logic
+            # (We pass None for ch, method, properties because we handle acks manually now)
+            self.process_job(body)
+
+            # SAFELY ack the message on the RabbitMQ connection thread
+            if self.connection and self.connection.is_open:
+                self.connection.add_callback_threadsafe(
+                    lambda: self.channel.basic_ack(delivery_tag=delivery_tag)
+                )
+
+        except Exception as e:
+            logger.error(f"Concurrent execution failed: {e}")
+            if self.connection and self.connection.is_open:
+                self.connection.add_callback_threadsafe(
+                    lambda: self.channel.basic_nack(delivery_tag=delivery_tag, requeue=False)
+                )
+        finally:
+            # Release the ticket so the polling loop can grab another job!
+            self.capacity_semaphore.release()
 
     def signal_handler(self, signum, frame) -> None:
         """Handle shutdown signals"""
