@@ -311,7 +311,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "admin".to_string());
     let status_url = env::var("STATUS_UPDATE_URL")
         .unwrap_or_else(|_| "http://10.2.1.11:8080/api/jobs/status".to_string());
-    let orchestrator_url = env::var("STATUS_UPDATE_URL")
+    let orchestrator_url = env::var("ORCHESTRATOR_URL")
         .unwrap_or_else(|_| "http://10.2.1.11:8081".to_string());
 
 
@@ -429,6 +429,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             info!("Handler {} pick up to handler job with id {}", handler.get_name(), job.id);
                             let result = handler.execute(&job).await;
                             ctx_job.send_status(&job.id, "completed", Some(result), None).await;
+                            {
+                                let mut m = ctx_job.metrics.lock().await;
+                                m.successful_jobs += 1;
+                            }
                             handled = true;
                             break;
                         }
@@ -436,6 +440,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     if !handled {
                         ctx_job.send_status(&job.id, "completed", Some(json!({"echo": "unhandled"})), None).await;
+                        {
+                            let mut m = ctx_job.metrics.lock().await;
+                            m.failed_jobs += 1;
+                        }
                     }
 
                     let _ = channel_job.basic_ack(delivery_tag, BasicAckOptions::default()).await;
